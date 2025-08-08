@@ -1,0 +1,498 @@
+from podio import root_io
+import ROOT
+import glob
+import pickle
+import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import functions
+import math
+import random
+
+ROOT.gROOT.SetBatch(True)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--muons', action='store_true', help='Process muon files')
+parser.add_argument('--background', action='store_true', help='Process background files')
+parser.add_argument('--plots', action='store_true', help='Compare muons and background plots')
+parser.add_argument('--maxFiles', type=int, default=100, help='Max files to process')
+parser.add_argument('--classify', action='store_true', help='Train and evaluate an SVM classifier')
+args = parser.parse_args()
+
+PITCH = functions.PITCH_MM
+RADIUS = functions.RADIUS_MM
+LAYER_RADII = [14, 36, 58]
+TARGET_LAYER = 0
+
+if args.muons or args.background:
+    zero_charge = 0
+    pos_charge = 0
+    neg_charge = 0
+    big_clusters = 0
+
+    if args.muons:
+        files = glob.glob('/ceph/submit/data/user/j/jaeyserm/fccee/beam_backgrounds/CLD_o2_v05/mu_theta_0-180_p_50/*.root')
+        data_file = 'muons_edep.pkl'
+    elif args.background:
+        files = glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/*.root')
+        data_file = 'bkg_edep.pkl'
+
+    cluster_metrics = []
+    small_clusters = 0
+    for i, filename in enumerate(files):
+        if i >= args.maxFiles:
+            break
+        print(f"Processing file {i+1}/{args.maxFiles}: {filename}")
+        reader = root_io.Reader(filename)
+        events = reader.get('events')
+        for event in events:
+            particles = {}
+            for hit in event.get('VertexBarrelCollection'):
+                try:
+                    if functions.radius_idx(hit, LAYER_RADII) != TARGET_LAYER:
+                        continue
+                    if hit.isProducedBySecondary():
+                        continue
+                    pos = hit.getPosition()
+                    if functions.discard_AB(pos):
+                        continue
+                    mc = hit.getMCParticle()
+                    if mc is None:
+                        continue
+                    trackID = mc.getObjectID().index
+                    energy = mc.getEnergy()
+                    try:
+                        edep = hit.getEDep()
+                    except AttributeError:
+                        edep = 0
+
+                    h = functions.Hit(x=pos.x, y=pos.y, z=pos.z, energy=energy, edep=edep, trackID=trackID)
+                    if trackID not in particles:
+                        particles[trackID] = functions.Particle(trackID)
+                    particles[trackID].add_hit(h)
+
+                except Exception as e:
+                    print(f"Skipping hit due to error: {e}")
+
+            for p in particles.values():
+                multiplicity = len(p.hits)
+                total_edep = p.total_energy()
+                cos_theta = functions.cos_theta(functions.geometric_baricenter(p.hits))
+                mc_energy = h.energy
+                z_ext = p.z_extent()
+                nrows = p.n_phi_rows(PITCH, RADIUS)
+                if multiplicity < 3:
+                    small_clusters += 1
+                    cluster_metrics.append((None, z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta))
+                    continue
+                big_clusters += 1
+                elong = functions.compute_elongation_phi_z(p.hits, RADIUS)
+                cluster_metrics.append((elong, z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta))
+
+    with open(data_file, 'wb') as f:
+        pickle.dump(cluster_metrics, f)
+    print(f"Saved metrics for {len(cluster_metrics)} clusters to {data_file}")
+    print(f"Analyzed {big_clusters} clusters with at least 3 hits")
+    print(f"Skipped {small_clusters} clusters with fewer than 3 hits")
+
+
+if args.plots:
+    from functions import plot_sig_bkg_hist, plot_overlay, extract, plot_energy_vs_costheta_binned, plot_dz_vs_costheta_per_multiplicity
+    outdir = 'muon_vs_background_plots'
+    random.seed(42)
+    os.makedirs(outdir, exist_ok=True)
+
+    with open('muons_edep.pkl', 'rb') as f:
+        muons = pickle.load(f)
+    with open('bkg_edep.pkl', 'rb') as f:
+        background = pickle.load(f)
+
+    # === Matched sampling ===
+    bkg_all = background
+    muon_all = random.sample(muons, len(bkg_all))
+    muon_big = [c for c in muons if c[3] and c[3] >= 3]
+    bkg_big_all = [c for c in background if c[3] and c[3] >= 3]
+    bkg_big = random.sample(bkg_big_all, len(muon_big))
+    print(f"All clusters: muons={len(muon_all)}, background={len(bkg_all)}")
+    print(f"Big clusters (≥3 hits): muons={len(muon_big)}, background={len(bkg_big)}")
+
+    mu_elong, mu_z, mu_rows, mu_mult, mu_edep, mu_mc_energy, mu_cos = extract(muon_big, 0, 1, 2, 3, 4, 5, 6)
+    bkg_elong, bkg_z, bkg_rows, bkg_mult, bkg_edep, bkg_mc_energy, bkg_cos = extract(bkg_big, 0, 1, 2, 3, 4, 5, 6)
+    mu_z_all, mu_rows_all, mu_mult_all, mu_edep_all, mu_mc_energy_all, mu_cos_all = extract(muon_all, 1, 2, 3, 4, 5, 6)
+    bkg_z_all, bkg_rows_all, bkg_mult_all, bkg_edep_all, bkg_mc_energy_all, bkg_cos_all = extract(bkg_all, 1, 2, 3, 4, 5, 6)
+
+    max_total_e = max(max(mu_edep_all), max(bkg_edep_all))
+
+    # === Plots ===
+    plot_sig_bkg_hist(mu_elong, bkg_elong, "elongation", "Elongation Comparison", r"$\lambda_1/\lambda_2$", bins=np.logspace(np.log10(1.0), np.log10(max(mu_elong + bkg_elong)), 100), logx=True, logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_z_all, bkg_z_all, "z_extent", "Z Extent Comparison", r"$\Delta z$ [mm]", bins=np.linspace(0, max(mu_z + bkg_z), 100), logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_rows_all, bkg_rows_all, "phi_rows", r"$\phi$ Rows Comparison", "Rows", bins=range(0, max(max(mu_rows), max(bkg_rows)) + 2), logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_mult_all, bkg_mult_all, "multiplicity", "Cluster Multiplicity Comparison", "Hits per Cluster", bins=range(1, max(max(mu_mult), max(bkg_mult)) + 2), outdir=outdir)
+    plot_sig_bkg_hist(mu_edep_all, bkg_edep_all, "cluster_edep", "Total SimHit Energy Deposited", "Edep [GeV]", bins=np.logspace(-6, np.log10(max_total_e * 1.1), 100), logx=True, outdir=outdir)
+    #plot overlay
+    plot_overlay(mu_elong, mu_z, bkg_elong, bkg_z, "elongation_vs_z_extent", r"$\lambda_1/\lambda_2$", r"$\Delta z$ [mm]", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_elong, mu_rows, bkg_elong, bkg_rows, "elongation_vs_phi_rows", r"$\lambda_1/\lambda_2$", "Rows", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep, mu_elong, bkg_edep, bkg_elong, "edep_vs_elongation", "Energy Deposited [GeV]", r"$\lambda_1/\lambda_2$", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_z_all, mu_rows_all, bkg_z_all, bkg_rows_all, "z_extent_vs_phi_rows", r"$\Delta z$ [mm]", "Rows", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_z_all, bkg_edep_all, bkg_z_all, "edep_vs_z_extent", "Edep [GeV]", r"$\Delta z$ [mm]", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_rows_all, bkg_edep_all, bkg_rows_all, "edep_vs_phi_rows", "Edep [GeV]", "Rows", logx=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_edep_all, bkg_cos_all, bkg_edep_all, "cos_theta_vs_edep", "cos(θ)", "Edep [GeV]", logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_z_all, bkg_cos_all, bkg_z_all, "cos_theta_vs_z_extent", "cos(θ)", r"$\Delta z$ [mm]", logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos, mu_elong, bkg_cos, bkg_elong, "cos_theta_vs_elongation", "cos(θ)", r"$\lambda_1/\lambda_2$", logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_rows_all, bkg_cos_all, bkg_rows_all, "cos_theta_vs_phi_rows", "cos(θ)", "Rows", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_mult_all, bkg_cos_all, bkg_mult_all, "cos_theta_vs_multiplicity", "cos(θ)", "Cluster Multiplicity", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_mc_energy_all, bkg_edep_all, bkg_mc_energy_all, "edep_vs_energy", "Edep [GeV]", "MC Energy [GeV]", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    cos_outdir = os.path.join(outdir, 'cos_edep_binned')
+    os.makedirs(cos_outdir, exist_ok=True)
+    plot_energy_vs_costheta_binned(sig_costheta=mu_cos_all, sig_edep=mu_edep_all, bkg_costheta=bkg_cos_all, bkg_edep=bkg_edep_all, nbins=10, outdir=cos_outdir)
+    plot_dz_vs_costheta_per_multiplicity(sig_costheta=mu_cos_all, sig_dz=mu_z_all, sig_mult=mu_mult_all, bkg_costheta=bkg_cos_all, bkg_dz=bkg_z_all, bkg_mult=bkg_mult_all, multiplicities=list(range(2, 11)))
+    print(f"Saved muon vs background plots in '{outdir}/'")
+
+
+
+
+
+from podio import root_io
+import ROOT
+import glob
+import pickle
+import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import functions
+import math
+import random
+
+ROOT.gROOT.SetBatch(True)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--muons', action='store_true', help='Process muon files')
+parser.add_argument('--plots', action='store_true', help='Compare high and low energy muon clusters')
+parser.add_argument('--maxFiles', type=int, default=100, help='Max files to process')
+args = parser.parse_args()
+
+PITCH = functions.PITCH_MM
+RADIUS = functions.RADIUS_MM
+LAYER_RADII = [14, 36, 58]
+TARGET_LAYER = 0
+ENERGY_THRESHOLD = 45.0  # GeV
+
+if args.muons:
+    zero_charge = 0
+    pos_charge = 0
+    neg_charge = 0
+    big_clusters = 0
+
+    files = glob.glob('/ceph/submit/data/user/j/jaeyserm/fccee/beam_backgrounds/CLD_o2_v05/mu_theta_0-180_p_50/*.root')
+    cluster_high = []
+    cluster_low = []
+    small_clusters = 0
+
+    for i, filename in enumerate(files):
+        if i >= args.maxFiles:
+            break
+        print(f"Processing file {i+1}/{args.maxFiles}: {filename}")
+        reader = root_io.Reader(filename)
+        events = reader.get('events')
+        for event in events:
+            particles = {}
+            for hit in event.get('VertexBarrelCollection'):
+                try:
+                    if functions.radius_idx(hit, LAYER_RADII) != TARGET_LAYER:
+                        continue
+                    if hit.isProducedBySecondary():
+                        continue
+                    pos = hit.getPosition()
+                    if functions.discard_AB(pos):
+                        continue
+                    mc = hit.getMCParticle()
+                    if mc is None:
+                        continue
+                    trackID = mc.getObjectID().index
+                    energy = mc.getEnergy()
+                    try:
+                        edep = hit.getEDep()
+                    except AttributeError:
+                        edep = 0
+
+                    h = functions.Hit(x=pos.x, y=pos.y, z=pos.z, energy=energy, edep=edep, trackID=trackID)
+                    if trackID not in particles:
+                        particles[trackID] = functions.Particle(trackID)
+                    particles[trackID].add_hit(h)
+
+                except Exception as e:
+                    print(f"Skipping hit due to error: {e}")
+
+            for p in particles.values():
+                multiplicity = len(p.hits)
+                total_edep = p.total_energy()
+                cos_theta = functions.cos_theta(functions.geometric_baricenter(p.hits))
+                mc_energy = p.hits[0].energy
+                z_ext = p.z_extent()
+                nrows = p.n_phi_rows(PITCH, RADIUS)
+                cluster = None
+                if multiplicity < 3:
+                    small_clusters += 1
+                    cluster = (None, z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta)
+                else:
+                    big_clusters += 1
+                    elong = functions.compute_elongation_phi_z(p.hits, RADIUS)
+                    cluster = (elong, z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta)
+                if cluster:
+                    if mc_energy >= ENERGY_THRESHOLD:
+                        cluster_high.append(cluster)
+                    else:
+                        cluster_low.append(cluster)
+
+    with open('muons_high_edep.pkl', 'wb') as f:
+        pickle.dump(cluster_high, f)
+    with open('muons_low_edep.pkl', 'wb') as f:
+        pickle.dump(cluster_low, f)
+    print(f"Saved {len(cluster_high)} high-energy and {len(cluster_low)} low-energy muon clusters.")
+    print(f"Skipped {small_clusters} clusters with fewer than 3 hits")
+
+if args.plots:
+    from functions import (
+        plot_sig_bkg_hist,
+        plot_overlay,
+        extract,
+        plot_energy_vs_costheta_binned,
+        plot_dz_vs_costheta_per_multiplicity
+    )
+    import os
+    outdir = 'muon_only_plots'
+    os.makedirs(outdir, exist_ok=True)
+
+    with open('muons_high_edep.pkl', 'rb') as f:
+        muons = pickle.load(f)
+
+    mu_all = muons
+    mu_big = [c for c in muons if c[3] and c[3] >= 3]
+
+    print(f"All muon clusters: {len(mu_all)}")
+    print(f"Big clusters (≥3 hits): {len(mu_big)}")
+
+    # Plot big cluster quantities (includes elongation)
+    if len(mu_big) > 0:
+        mu_elong, mu_z, mu_rows, mu_mult, mu_edep, mu_mc_energy, mu_cos = extract(mu_big, 0, 1, 2, 3, 4, 5, 6)
+        plot_sig_bkg_hist(mu_elong, [], "elongation", "Elongation", r"$\lambda_1/\lambda_2$",
+                          bins=np.logspace(np.log10(1.0), np.log10(max(mu_elong)), 100),
+                          logx=True, logy=True, outdir=outdir)
+        plot_overlay(mu_elong, mu_z, [], [], "elongation_vs_z_extent", r"$\lambda_1/\lambda_2$", r"$\Delta z$ [mm]",
+                     logx=True, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+        plot_overlay(mu_elong, mu_rows, [], [], "elongation_vs_phi_rows", r"$\lambda_1/\lambda_2$", "Rows",
+                     logx=True, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+        plot_overlay(mu_edep, mu_elong, [], [], "edep_vs_elongation", "Energy Deposited [GeV]", r"$\lambda_1/\lambda_2$",
+                     logx=True, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+        plot_overlay(mu_cos, mu_elong, [], [], "cos_theta_vs_elongation", "cos(θ)", r"$\lambda_1/\lambda_2$",
+                     logx=False, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    else:
+        print("⚠️  No muon clusters with ≥ 3 hits. Skipping elongation plots.")
+
+    # Plot all clusters (no elongation, just stats and geometry)
+    mu_z_all, mu_rows_all, mu_mult_all, mu_edep_all, mu_mc_energy_all, mu_cos_all = extract(mu_all, 1, 2, 3, 4, 5, 6)
+    max_total_e = max(mu_edep_all)
+
+    plot_sig_bkg_hist(mu_z_all, [], "z_extent", "Z Extent", r"$\Delta z$ [mm]",
+                      bins=np.linspace(0, max(mu_z_all), 100), logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_rows_all, [], "phi_rows", r"$\phi$ Rows", "Rows",
+                      bins=range(0, max(mu_rows_all) + 2), logy=True, outdir=outdir)
+    plot_overlay(mu_z_all, mu_rows_all, [], [], "z_extent_vs_phi_rows", r"$\Delta z$ [mm]", "Rows",
+                 outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_edep_all, mu_z_all, [], [], "edep_vs_z_extent", "Energy Deposited [GeV]", r"$\Delta z$ [mm]",
+                 logx=True, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_edep_all, mu_rows_all, [], [], "edep_vs_phi_rows", "Energy Deposited [GeV]", "Rows",
+                 logx=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_cos_all, mu_edep_all, [], [], "cos_theta_vs_edep", "cos(θ)", "Energy Deposited [GeV]",
+                 logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_cos_all, mu_z_all, [], [], "cos_theta_vs_z_extent", "cos(θ)", r"$\Delta z$ [mm]",
+                 logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_cos_all, mu_rows_all, [], [], "cos_theta_vs_phi_rows", "cos(θ)", "Rows",
+                 outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_overlay(mu_cos_all, mu_mult_all, [], [], "cos_theta_vs_multiplicity", "cos(θ)", "Cluster Multiplicity",
+                 outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_sig_bkg_hist(mu_mult_all, [], "multiplicity", "Cluster Multiplicity", "Hits per Cluster",
+                      bins=range(1, max(mu_mult_all) + 2), outdir=outdir)
+    plot_overlay(mu_edep_all, mu_mc_energy_all, [], [], "edep_vs_energy",
+                 "Energy Deposited [GeV]", "MC Particle Energy [GeV]",
+                 logx=True, logy=True, outdir=outdir, label_sig="Muons", label_bkg="")
+    plot_sig_bkg_hist(mu_edep_all, [], "cluster_edep", "Total SimHit Energy Deposited per Cluster",
+                      "Energy Deposited [GeV]",
+                      bins=np.logspace(-6, np.log10(max_total_e * 1.1), 100),
+                      logx=True, outdir=outdir)
+
+    # Binned cosθ plots
+    cos_outdir = os.path.join(outdir, 'cos_edep_binned')
+    os.makedirs(cos_outdir, exist_ok=True)
+    plot_energy_vs_costheta_binned(sig_costheta=mu_cos_all, sig_edep=mu_edep_all,
+                                   bkg_costheta=[], bkg_edep=[],
+                                   nbins=10, outdir=cos_outdir)
+    plot_dz_vs_costheta_per_multiplicity(sig_costheta=mu_cos_all, sig_dz=mu_z_all, sig_mult=mu_mult_all,
+                                         bkg_costheta=[], bkg_dz=[], bkg_mult=[],
+                                         multiplicities=list(range(1, 21)))
+
+    print(f"✅ Saved muon-only plots in '{outdir}/'")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    ######################## Newest
+
+
+from podio import root_io
+import ROOT
+import glob
+import pickle
+import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import functions
+import math
+import random
+ROOT.gROOT.SetBatch(True)
+parser = argparse.ArgumentParser()
+parser.add_argument('--muons', action='store_true', help='Process muon files')
+parser.add_argument('--background', action='store_true', help='Process background files')
+parser.add_argument('--plots', action='store_true', help='Compare muons and background plots')
+parser.add_argument('--maxFiles', type=int, default=100, help='Max files to process')
+parser.add_argument('--classify', action='store_true', help='Train and evaluate an SVM classifier')
+args = parser.parse_args()
+PITCH = functions.PITCH_MM
+RADIUS = functions.RADIUS_MM
+LAYER_RADII = [14, 36, 58]
+TARGET_LAYER = 0
+
+if args.muons or args.background:
+    if args.muons:
+        files = glob.glob('/ceph/submit/data/user/j/jaeyserm/fccee/beam_backgrounds/CLD_o2_v05/mu_theta_0-180_p_50/*.root')
+        data_file = 'muons_edep.pkl'
+    elif args.background:
+        files = glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/*.root')
+        data_file = 'bkg_edep.pkl'
+
+    cluster_metrics = []
+    for i, filename in enumerate(files):
+        if i >= args.maxFiles:
+            break
+        print(f"Processing file {i+1}/{args.maxFiles}: {filename}")
+        reader = root_io.Reader(filename)
+        events = reader.get('events')
+        for event in events:
+            particles = {}
+            for hit in event.get('VertexBarrelCollection'):
+                try:
+                    # the cellID corresponds to a cluster of pixels = module
+                    # the readout is done per module
+                    cellID = hit.getCellID()
+                    if cellID != 8193:
+                        continue
+                    if functions.radius_idx(hit, LAYER_RADII) != TARGET_LAYER:
+                        continue
+                    if hit.isProducedBySecondary():
+                        continue
+                    pos = hit.getPosition()
+                    if functions.discard_AB(pos):
+                        continue
+                    if args.muons and (hit.getMCParticle().getEnergy() < 48):
+                        continue
+                    mc = hit.getMCParticle()
+                    if mc is None:
+                        continue
+                    trackID = mc.getObjectID().index
+                    energy = mc.getEnergy()
+                    try:
+                        edep = hit.getEDep()
+                    except AttributeError:
+                        edep = 0
+                    h = functions.Hit(x=pos.x, y=pos.y, z=pos.z, energy=energy, edep=edep, trackID=trackID)
+                    if trackID not in particles:
+                        particles[trackID] = functions.Particle(trackID)
+                    particles[trackID].add_hit(h)
+
+                except Exception as e:
+                    print(f"Skipping hit due to error: {e}")
+
+            for p in particles.values():
+                if len(p.hits) == 2:
+                    p.hits = functions.merge_cluster_hits(p.hits)
+                multiplicity = len(p.hits)
+                total_edep = p.total_energy()
+                b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
+                cos_theta = functions.cos_theta(b_x,b_y,b_z)
+                mc_energy = h.energy
+                z_ext = p.z_extent()
+                nrows = p.n_phi_rows(PITCH, RADIUS)
+                cluster_metrics.append((z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta, b_x, b_y))
+
+    with open(data_file, 'wb') as f:
+        pickle.dump(cluster_metrics, f)
+    print(f"Saved metrics for {len(cluster_metrics)} clusters to {data_file}")
+
+
+if args.plots:
+    from functions import plot_sig_bkg_hist, plot_overlay, extract, plot_energy_vs_costheta_binned, plot_dz_vs_costheta_per_multiplicity
+    outdir = 'muon_vs_background_plots'
+    random.seed(42)
+    os.makedirs(outdir, exist_ok=True)
+    with open('muons_edep.pkl', 'rb') as f:
+        muons = pickle.load(f)
+    with open('bkg_edep.pkl', 'rb') as f:
+        background = pickle.load(f)
+    # === Matched sampling ===
+    bkg_all = background
+    muon_all = random.sample(muons, len(bkg_all))
+    print(f"All clusters: muons={len(muon_all)}, background={len(bkg_all)}")
+    mu_z_all, mu_rows_all, mu_mult_all, mu_edep_all, mu_mc_energy_all, mu_cos_all, mu_b_x, mu_b_y = extract(muon_all, 0, 1, 2, 3, 4, 5, 6,7)
+    bkg_z_all, bkg_rows_all, bkg_mult_all, bkg_edep_all, bkg_mc_energy_all, bkg_cos_all, bkg_b_x, bkg_b_y = extract(bkg_all, 0, 1, 2, 3, 4, 5, 6,7)
+    max_total_e = max(max(mu_edep_all), max(bkg_edep_all))
+
+    # === Plots ===
+    #plot_sig_bkg_hist(mu_elong, bkg_elong, "elongation", "Elongation Comparison", r"$\lambda_1/\lambda_2$", bins=np.logspace(np.log10(1.0), np.log10(max(mu_elong + bkg_elong)), 100), logx=True, logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_z_all, bkg_z_all, "z_extent", "Z Extent Comparison", r"$\Delta z$ [mm]", bins=np.linspace(0, max(mu_z_all + bkg_z_all), 100), logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_rows_all, bkg_rows_all, "phi_rows", r"$\phi$ Rows Comparison", "Rows", bins=range(0, max(max(mu_rows_all), max(bkg_rows_all)) + 2), logy=True, outdir=outdir)
+    plot_sig_bkg_hist(mu_mult_all, bkg_mult_all, "multiplicity", "Cluster Multiplicity Comparison", "Hits per Cluster", bins=range(1, max(max(mu_mult_all), max(bkg_mult_all)) + 2), outdir=outdir)
+    plot_sig_bkg_hist(mu_edep_all, bkg_edep_all, "cluster_edep", "Total SimHit Energy Deposited", "Edep [GeV]", bins=np.logspace(-6, np.log10(max_total_e * 1.1), 100), logx=True, outdir=outdir)
+    #plot overlay
+    plot_overlay(mu_z_all, mu_rows_all, bkg_z_all, bkg_rows_all, "z_extent_vs_phi_rows", r"$\Delta z$ [mm]", "Rows", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_z_all, bkg_edep_all, bkg_z_all, "edep_vs_z_extent", "Edep [GeV]", r"$\Delta z$ [mm]", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_rows_all, bkg_edep_all, bkg_rows_all, "edep_vs_phi_rows", "Edep [GeV]", "Rows", logx=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_edep_all, bkg_cos_all, bkg_edep_all, "cos_theta_vs_edep", "cos(θ)", "Edep [GeV]", logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_z_all, bkg_cos_all, bkg_z_all, "cos_theta_vs_z_extent", "cos(θ)", r"$\Delta z$ [mm]", logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_rows_all, bkg_cos_all, bkg_rows_all, "cos_theta_vs_phi_rows", "cos(θ)", "Rows", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_cos_all, mu_mult_all, bkg_cos_all, bkg_mult_all, "cos_theta_vs_multiplicity", "cos(θ)", "Cluster Multiplicity", outdir=outdir, label_sig="muons", label_bkg="background")
+    plot_overlay(mu_edep_all, mu_mc_energy_all, bkg_edep_all, bkg_mc_energy_all, "edep_vs_energy", "Edep [GeV]", "MC Energy [GeV]", logx=True, logy=True, outdir=outdir, label_sig="muons", label_bkg="background")
+    #Mult vs. Mc Energy
+    plot_overlay(mu_mc_energy_all, mu_mult_all, bkg_mc_energy_all, bkg_mult_all, name="mc_energy_vs_multiplicity", xlabel="MC Particle Energy [GeV]", ylabel="Cluster Multiplicity", logx=True, logy=False, outdir=outdir, label_sig="muons", label_bkg="background")
+    
+    cos_outdir = os.path.join(outdir, 'cos_edep_binned')
+    os.makedirs(cos_outdir, exist_ok=True)
+    plot_energy_vs_costheta_binned(sig_costheta=mu_cos_all, sig_edep=mu_edep_all, bkg_costheta=bkg_cos_all, bkg_edep=bkg_edep_all, nbins=10, outdir=cos_outdir)
+    
+    mult_outdir = os.path.join(outdir, 'cos_z_mult')
+    os.makedirs(mult_outdir, exist_ok=True)
+    plot_dz_vs_costheta_per_multiplicity(sig_costheta=mu_cos_all,sig_dz=mu_z_all,sig_mult=mu_mult_all,bkg_costheta=bkg_cos_all,bkg_dz=bkg_z_all,bkg_mult=bkg_mult_all,multiplicities=list(range(2, 4)),outdir=mult_outdir)
+    mu_bx_2 = [x for x, m in zip(mu_b_x, mu_mult_all) if m == 2]
+    mu_by_2 = [y for y, m in zip(mu_b_y, mu_mult_all) if m == 2]
+    bkg_bx_2 = [x for x, m in zip(bkg_b_x, bkg_mult_all) if m == 2]
+    bkg_by_2 = [y for y, m in zip(bkg_b_y, bkg_mult_all) if m == 2]
+        
+    plot_overlay(mu_bx_2, mu_by_2, bkg_bx_2, bkg_by_2,name="barycenter_xy_multiplicity2",xlabel="b_x [mm]",ylabel="b_y [mm]",outdir=outdir,label_sig="muons",label_bkg="background")
+    #if len(mu_bx_2 != 0):
+    #    print('Found one!')
+    print(f"Saved muon vs background plots in '{outdir}/'")
