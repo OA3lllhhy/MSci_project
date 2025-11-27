@@ -68,7 +68,7 @@ if args.run:
                         if hit.isProducedBySecondary():
                             continue
                         pos = hit.getPosition()
-                        if functions.discard_AB(pos):
+                        if functions.discard_AB(pos): # Separate by layer 1, remove outer layer of 1 which is 1B
                             continue
                         mc = hit.getMCParticle()
                         if mc is None:

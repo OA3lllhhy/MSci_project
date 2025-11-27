@@ -161,39 +161,49 @@ if args.run:
             if i >= limit:
                 break
             print(f"[{label.upper()}] Processing file {i+1}/{limit}: {filename}")
+            # Open ROOT file with PODIO
             reader = root_io.Reader(filename)
             events = reader.get('events')
-
+            
+            # Iterate over events
             for event in events:
                 particle_hits = defaultdict(list)
 
+                # Extract hit information from detector collection
                 for hit in event.get('VertexBarrelCollection'):
                     try:
+                        # Separate by layer remove layer 2 and 3
                         if functions.radius_idx(hit, LAYER_RADII) != TARGET_LAYER:
                             continue
+                        # Skip hits produced by secondary particles
                         if hit.isProducedBySecondary():
                             continue
-                        pos = hit.getPosition()
-                        mc = hit.getMCParticle()
+                        pos = hit.getPosition() # 3D position
+                        mc = hit.getMCParticle() # Monte Carlo truth particle
                         if mc is None:
                             continue
-                        trackID = mc.getObjectID().index
-                        energy = mc.getEnergy()
-                        pid = mc.getPDG()
+                        trackID = mc.getObjectID().index # Unique particle identifier
+                        energy = mc.getEnergy() # Particle energy
+                        pid = mc.getPDG() # Particle type
                         try:
-                            edep = hit.getEDep()
+                            edep = hit.getEDep() # Energy deposition
                         except AttributeError:
                             edep = 0
+                        # Create Hit object
                         h = functions.Hit(x=pos.x, y=pos.y, z=pos.z, energy=energy, edep=edep, trackID=trackID)
+                        # Group hits by particle trackID
                         particle_hits[trackID].append((trackID, h, pid))
                     except Exception as e:
                         print(f"Skipping hit due to error: {e}")
 
+                # Build particle clusters from grouped hits
                 for trackID, hit_group in particle_hits.items():
                     if not hit_group:
                         continue
                     _, _, pid = hit_group[0]
-                    p = functions.Particle(trackID=trackID, cellID=None, pid=pid)
+                    p = functions.Particle(trackID=trackID)
+                    p.pid = pid
+                    # p = functions.Particle(trackID=trackID, cellID=None, pid=pid)
                     for _, h, _ in hit_group:
                         p.add_hit(h)
                         
@@ -204,7 +214,20 @@ if args.run:
                     b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
                     cos_theta = functions.cos_theta(b_x, b_y, b_z)
                     mc_energy = p.hits[0].energy
-                    z_ext = p.z_extent()
+                    # z_ext = p.z_extent()
+                    # Compute barycenter first
+                    b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
+                    # Conservative Δz (actual hits)
+                    z_ext_raw = p.z_extent()
+                    # Optimistic geometric Δz
+                    z_ext_opt = functions.analytic_delta_z(p.hits, b_x, b_y, b_z)
+                    # Final Δz used for classifier:
+                    # If optimistic formula available, use it.
+                    if z_ext_opt is not None:
+                        z_ext = z_ext_opt
+                    else:
+                        z_ext = z_ext_raw
+
                     nrows = p.n_phi_rows(PITCH, RADIUS)
 
                     cluster_metrics.append((z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta, b_x, b_y, pid))
@@ -325,7 +348,8 @@ if args.plots:
     from functions import extract, plot_overlay
     import os, pickle, random
 
-    outdir = 'cos_vs_z_extent'
+    # outdir = 'cos_vs_z_extent'
+    outdir = 'AB_Full_Classifier_outputs'
     os.makedirs(outdir, exist_ok=True)
     random.seed(42)
 
@@ -333,24 +357,30 @@ if args.plots:
         signal = pickle.load(f)
     with open('ABbkg_edep.pkl', 'rb') as f:
         background = pickle.load(f)
+    with open('ABmuons_edep.pkl', 'rb') as f:
+        muons = pickle.load(f)
 
     bkg_all = background
     sig_all = random.sample(signal, len(bkg_all))
 
-    sig_z_all, _, _, _, _, sig_cos_all, _, _ = extract(sig_all, 0, 1, 2, 3, 4, 5, 6, 7)
-    bkg_z_all, _, _, _, _, bkg_cos_all, _, _ = extract(bkg_all, 0, 1, 2, 3, 4, 5, 6, 7)
+    sig_z_all, _, _, _, sig_edep_all, sig_cos_all, _, _ = extract(sig_all, 0, 1, 2, 3, 4, 5, 6, 7)
+    bkg_z_all, _, _, _, bkg_edep_all, bkg_cos_all, _, _ = extract(bkg_all, 0, 1, 2, 3, 4, 5, 6, 7)
+
+    fig_name = "z_extent_vs_cos_theta"
 
     plot_overlay(
         sig_cos_all, sig_z_all,
         bkg_cos_all, bkg_z_all,
-        name="cos_theta_vs_z_extent",
+        name=fig_name,
         xlabel="cos(θ)",
         ylabel=r"$\Delta z$ [mm]",
         logy=True,
         outdir=outdir,
-        label_sig="muons",
+        label_sig="signal",
         label_bkg="background"
     )
+
+    print(f"✅ Plot saved to {os.path.join(outdir, fig_name + '.png')}")
 
 
 if args.classify:
@@ -463,7 +493,7 @@ if args.classify:
     plt.title("Threshold Sweep — TPR, FPR")
     plt.legend(loc='best')
     plt.grid(True)
-    plt.savefig(os.path.join(outdir, "threshold_sweep_metrics.png"))
+    #plt.savefig(os.path.join(outdir, "threshold_sweep_metrics.png"))
     plt.close()
 
     fpr, tpr, _ = roc_curve(y_test, y_proba)
@@ -475,7 +505,7 @@ if args.classify:
     plt.title("ROC Curve — Final XGBoost Classifier")
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(outdir, "presentation_ROC_curve.png"))
+    #plt.savefig(os.path.join(outdir, "presentation_ROC_curve.png"))
     plt.close()
 
     ConfusionMatrixDisplay.from_predictions(
@@ -485,7 +515,7 @@ if args.classify:
         values_format='d'
     )
     plt.title(f"Confusion Matrix @ Threshold = {best_thresh:.4f}")
-    plt.savefig(os.path.join(outdir, "presentation_confusion_matrix.png"))
+    #plt.savefig(os.path.join(outdir, "presentation_confusion_matrix.png"))
     plt.close()
     
     functions.plot_feature_importance(
