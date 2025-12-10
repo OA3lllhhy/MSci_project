@@ -11,14 +11,24 @@ signal = '/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_wz3p6_ee
 background = '/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/*.root'
 
 # Choose which to run over
-folder = background  # <- change to `signal` if you want
+folder = signal  # <- change to `signal` if you want
 files = glob.glob(f"{folder}")
+
+# ===== DEBUG: Print file information =====
+print(f"Looking for files in: {folder}")
+print(f"Number of files found: {len(files)}")
+if len(files) == 0:
+    print("ERROR: No files found! Check the path.")
+    exit(1)
+else:
+    print(f"First few files: {files[:3]}")
+
 
 # --- Config ---
 layer_radii = [14, 36, 58]  # CLD approximate layer radii
 max_z = 110  # mm
 TARGET_LAYER = 0            # Only show hits on this layer
-outdir = "event_display"
+outdir = "event_display/signal_events"  # Output directory
 os.makedirs(outdir, exist_ok=True)
 max_events = 50             # <-- run over 50 events total
 event_counter = 0
@@ -82,17 +92,19 @@ for i, filename in enumerate(files):
         for p in particles.values():
             for h in p.hits:
                 phi_deg = h.phi() * 180.0 / math.pi
-                hist.Fill(h.z, phi_deg, 1.0)
+                # hist.Fill(h.z, phi_deg, 1.0)
+                hist.Fill(h.z, phi_deg, h.edep)  # Use edep as weight
 
         # Add to cumulative
         cumulative.Add(hist)
 
         # Save per-event plot (title reflects multiplicity)
-        outname = f"{outdir}/event_{event_counter:04d}.png"
+        outname = f"{outdir}/event_{event_counter:04d}_Energy.png"
         functions.plot_2dhist(
             hist,
             outname=outname,
-            title=f"Hit Multiplicity – Event {event_counter}",
+            # title=f"Hit Multiplicity – Event {event_counter}",
+            title=f"Hit Energy Deposition – Event {event_counter}",
             xMin=-max_z, xMax=max_z,
             xLabel="z (mm)", yLabel="Azimuthal angle φ (deg)"
         )
@@ -104,13 +116,15 @@ for i, filename in enumerate(files):
         break
 
 # Save the summed plot
-sum_out = f"{outdir}/events_0_to_{event_counter-1}_SUM.png"
+sum_out = f"{outdir}/events_0_to_{event_counter-1}_SUM_Energy.png"
 functions.plot_2dhist(
     cumulative,
     outname=sum_out,
-    title=f"Hit Multiplicity – Sum of {event_counter} events",
+    # title=f"Hit Multiplicity – Sum of {event_counter} signal events",
+    title=f"Hit Energy Deposition – Sum of {event_counter} signal events",
     xMin=-max_z, xMax=max_z,
-    xLabel="z (mm)", yLabel="Azimuthal angle φ (deg)"
+    xLabel="z (mm)", yLabel="Azimuthal angle φ (deg)",
+    logBar=True
 )
 
 print(f"Done. Wrote {event_counter} per-event plots to {outdir} and a summed plot: {sum_out}")

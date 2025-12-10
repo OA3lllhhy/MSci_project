@@ -23,6 +23,8 @@ from sklearn.metrics import (
     roc_auc_score, roc_curve, confusion_matrix,
     classification_report, precision_recall_curve, precision_recall_fscore_support, ConfusionMatrixDisplay
 )
+import mplhep
+import matplotlib.colors as colors
 
 hep.style.use(hep.style.ROOT)
 
@@ -396,10 +398,12 @@ def plot_hist(h, outname, title, xMin=-1, xMax=-1, yMin=-1, yMax=-1, xLabel="", 
     #fig.savefig(outname.replace(".png", ".pdf"), bbox_inches="tight")
     fig.savefig(outname.replace(".png"), bbox_inches="tight")
 
-def plot_2dhist(h, outname, title, xMin=-1, xMax=-1, yMin=-1, yMax=-1, xLabel="", yLabel="Events", logY=False):
+def plot_2dhist(h, outname, title, xMin=-1, xMax=-1, yMin=-1, yMax=-1, xLabel="", yLabel="Events", logY=False, logBar=False):
+    # ---- Logarithmic color scale ----
+    norm = colors.LogNorm() if logBar else None
     fig = plt.figure()
     ax = fig.subplots()
-    hep.hist2dplot(h, label="", ax=ax)
+    hep.hist2dplot(h, label="", ax=ax, norm=norm)
     ax.set_title(title)
     ax.set_xlabel(xLabel)
     ax.set_ylabel(yLabel)
@@ -410,6 +414,7 @@ def plot_2dhist(h, outname, title, xMin=-1, xMax=-1, yMin=-1, yMax=-1, xLabel=""
         ax.set_xlim([xMin, xMax])
     if yMin != -1 and yMax != -1:
         ax.set_ylim([yMin, yMax])
+
     fig.savefig(outname, bbox_inches="tight")
     plt.close(fig)
     
@@ -804,21 +809,17 @@ class ParticleClassifier(nn.Module):
         super().__init__()
         
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 32),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            
-            nn.Linear(32, 16),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            
-            nn.Linear(16, 8),
-            nn.ReLU(),
-            
-            nn.Linear(8, 1),
-            nn.Sigmoid()
+                nn.Linear(input_dim, 16),
+                nn.ReLU(),
+                
+                nn.Linear(16, 16),
+                nn.ReLU(),
+                
+                nn.Linear(16, 8),
+                nn.ReLU(),
+                
+                nn.Linear(8, 1),
+                nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -828,9 +829,9 @@ def train_neural_network(
     model,
     train_loader,
     valid_loader,
+    save_path,
     num_epochs=50,
     lr = 0.01,
-    save_path = 'Classification_AB/NeuralNetwork/best_model.pth',
     patience=5,
     device = 'cuda' if torch.cuda.is_available() else 'cpu'):
     
@@ -907,10 +908,11 @@ def evaluate_model(
     model_class,
     input_dim,
     test_loader,
+    save_dir,
+    threshold_plot_dir,
+    cm_path,
     device="cuda" if torch.cuda.is_available() else "cpu",
-    save_dir="/work/submit/haoyun22/FCC-Beam-Background/Classification_AB/NeuralNetwork/Evaluation_NN/roc_plots",
-    threshold_plot_dir="/work/submit/haoyun22/FCC-Beam-Background/Classification_AB/NeuralNetwork/Evaluation_NN/threshold_plots",
-    cm_path="/work/submit/haoyun22/FCC-Beam-Background/Classification_AB/NeuralNetwork/Evaluation_NN/confusion_matrix"
+
 ):
     """
     Evaluate a saved PyTorch classifier.
@@ -972,7 +974,7 @@ def evaluate_model(
     fpr, tpr, _ = roc_curve(y_true, y_scores)
 
     os.makedirs(save_dir, exist_ok=True)
-    roc_path = os.path.join(save_dir, "roc_curve_nn.png")
+    roc_path = os.path.join(save_dir, "roc_curve_nn_v3.png")
 
     plt.figure()
     plt.plot(fpr, tpr, label=f"AUC = {auc:.4f}")
@@ -1022,7 +1024,7 @@ def evaluate_model(
     y_pred = (y_scores >= best_thresh).astype(int)
 
     os.makedirs(threshold_plot_dir, exist_ok=True)
-    threshold_plot = os.path.join(threshold_plot_dir, "threshold_sweep_plot.png")
+    threshold_plot = os.path.join(threshold_plot_dir, "threshold_sweep_plot_v3.png")
 
     plt.plot(thresholds, tpr_list, label='TPR (Signal Retention)')
     plt.plot(thresholds, fpr_list, label='FPR (Background Acceptance)')
@@ -1040,7 +1042,7 @@ def evaluate_model(
 
     ConfusionMatrixDisplay.from_predictions(y_true, y_pred, display_labels=["Background", "Signal"],cmap="Blues",values_format='d')
     os.makedirs(cm_path, exist_ok=True)
-    cm_plot_path = os.path.join(cm_path, "confusion_matrix_nn.png")
+    cm_plot_path = os.path.join(cm_path, "confusion_matrix_nn_v3.png")
     plt.title("Neural Network Confusion Matrix")
     plt.savefig(cm_plot_path)
     plt.close()

@@ -28,124 +28,20 @@ RADIUS = functions.RADIUS_MM
 LAYER_RADII = [14, 36, 58]
 TARGET_LAYER = 0
 
-"""if args.run:
-    all_configs = {
-        'muons': {
-            'files': glob.glob('/ceph/submit/data/user/j/jaeyserm/fccee/beam_backgrounds/CLD_o2_v05/mu_theta_0-180_p_50/*.root'),
-            'outfile': 'ABmuons_edep_crossB.pkl'
-        },
-        'signal': {
-            'files': glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_wz3p6_ee_qq_ecm91p2/*.root'),
-            'outfile': 'ABsignal_edep_crossB.pkl'
-        },
-        'background': {
-            'files': glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/*.root'),
-            'outfile': 'ABbkg_edep_crossB.pkl'
-        }
-    }
 
-    seen_cellids = set()
-    unknown_cellids = set()
-
-    for label, config in all_configs.items():
-        files = config['files']
-        outfile = config['outfile']
-        cluster_metrics = []
-        limit = {
-            'muons': 100,
-            'signal': 50,
-            'background': 500
-        }[label]
-
-        for i, filename in enumerate(files):
-            if i >= limit:
-                break
-            print(f"[{label.upper()}] Processing file {i+1}/{limit}: {filename}")
-            reader = root_io.Reader(filename)
-            events = reader.get('events')
-
-            for event in events:
-                module_hits = defaultdict(list)
-
-                for hit in event.get('VertexBarrelCollection'):
-                    try:
-                        if functions.radius_idx(hit, LAYER_RADII) != TARGET_LAYER:
-                            continue
-                        if hit.isProducedBySecondary():
-                            continue
-                        pos = hit.getPosition()
-                        mc = hit.getMCParticle()
-                        if mc is None:
-                            continue
-                        trackID = mc.getObjectID().index
-                        energy = mc.getEnergy()
-                        pid = mc.getPDG()
-                        try:
-                            edep = hit.getEDep()
-                        except AttributeError:
-                            edep = 0
-
-                        h = functions.Hit(x=pos.x, y=pos.y, z=pos.z, energy=energy, edep=edep, trackID=trackID)
-
-                        cellID = hit.getCellID()
-                        group_id = functions.cellid_to_group(cellID)
-                        seen_cellids.add(cellID)
-
-                        if group_id is None:
-                            unknown_cellids.add(cellID)
-                            continue  # skip cellIDs not in defined 16 groups
-
-                        # Group hits by shared cellID group
-                        module_hits[group_id].append((trackID, h, pid))
-
-                    except Exception as e:
-                        print(f"Skipping hit due to error: {e}")
-
-                # Cluster hits per merged group
-                for group_id, hit_group in module_hits.items():
-                    particles = {}
-                    for trackID, h, pid in hit_group:
-                        key = (trackID, group_id)
-                        if key not in particles:
-                            particles[key] = functions.Particle(trackID=trackID, cellID=group_id, pid=pid)
-                        particles[key].add_hit(h)
-
-                    for p in particles.values():
-                        #if len(p.hits) == 2:
-                        #    p.hits = functions.merge_cluster_hits(p.hits)
-                        multiplicity = len(p.hits)
-                        total_edep = p.total_energy()
-                        b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
-                        cos_theta = functions.cos_theta(b_x, b_y, b_z)
-                        mc_energy = p.hits[0].energy
-                        z_ext = p.z_extent()
-                        nrows = p.n_phi_rows(PITCH, RADIUS)
-                        cluster_metrics.append((z_ext, nrows, multiplicity, total_edep, mc_energy, cos_theta, b_x, b_y, p.pid))
-
-        with open(outfile, 'wb') as f:
-            pickle.dump(cluster_metrics, f)
-        print(f"✅ Saved {label} clusters to {outfile}")
-
-    # Report cellIDs not in your defined mapping
-    if unknown_cellids:
-        print(f"\n⚠️ WARNING: The following {len(unknown_cellids)} cellIDs were encountered but not mapped to any group:")
-        print(sorted(unknown_cellids))
-    else:
-        print("\n✅ All encountered cellIDs were successfully mapped to groups.")"""
-#{'learning_rate': 0.2, 'max_depth': 8, 'scale_pos_weight': 0.25}
 if args.run:
     all_configs = {
         'muons': {
             'files': glob.glob('/ceph/submit/data/user/j/jaeyserm/fccee/beam_backgrounds/CLD_o2_v05/mu_theta_0-180_p_50/*.root'),
-            'outfile': 'ABmuons_edep_xB_label_v2.pkl'
+            'outfile': '/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v3.pkl'
         },
         'signal': {
             'files': glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_wz3p6_ee_qq_ecm91p2/*.root'),
-            'outfile': 'ABsignal_edep_xB_label_v2.pkl'
+            'outfile': '/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v3.pkl'
         },
         'background': {
             'files': glob.glob('/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/*.root'),
-            'outfile': 'ABbkg_edep_xB_label_v2.pkl'
+            'outfile': '/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v3.pkl'
         }
     }
 
@@ -216,20 +112,22 @@ if args.run:
                     b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
                     cos_theta = functions.cos_theta(b_x, b_y, b_z)
                     mc_energy = p.hits[0].energy
-                    # z_ext = p.z_extent()
                     
                     
-                    # Compute barycenter first
-                    b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
-                    # Conservative Δz (actual hits)
-                    z_ext_raw = p.z_extent()
-                    # Optimistic geometric Δz
-                    z_ext_opt = functions.analytic_delta_z(p.hits, b_x, b_y, b_z)
+                    
+                    z_ext = p.z_extent()
+                    
+                    # # Compute barycenter first
+                    # b_x, b_y, b_z = functions.geometric_baricenter(p.hits)
+                    # # Conservative Δz (actual hits)
+                    # z_ext_raw = p.z_extent()
+                    # # Optimistic geometric Δz
+                    # z_ext_opt = functions.analytic_delta_z(p.hits, b_x, b_y, b_z)
 
-                    if z_ext_opt is not None:
-                        z_ext = z_ext_opt
-                    else:
-                        z_ext = z_ext_raw
+                    # if z_ext_opt is not None:
+                    #     z_ext = z_ext_opt
+                    # else:
+                    #     z_ext = z_ext_raw
 
                     if functions.discard_AB(pos):
                         cross_B = 1
@@ -244,114 +142,7 @@ if args.run:
             pickle.dump(cluster_metrics, f)
         print(f"✅ Saved {label} clusters to {outfile}")
 
-"""if args.classify:
-    import xgboost as xgb
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import (
-        classification_report,
-        confusion_matrix,
-        roc_auc_score,
-        roc_curve
-    )
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import pickle
-    import os
-    from functions import get_features_and_labels
 
-    outdir = 'Classification_AB'
-    os.makedirs(outdir, exist_ok=True)
-
-    # === Load data ===
-    with open('ABsignal_edep.pkl', 'rb') as f:
-        signal_data = pickle.load(f)
-    with open('ABbkg_edep.pkl', 'rb') as f:
-        background_data = pickle.load(f)
-
-    # === Use transformed features ===
-    X, y = get_features_and_labels(signal_data, background_data)
-
-    # === Train-test split ===
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # === Train XGBoost Classifier with fixed params ===
-    clf = xgb.XGBClassifier(
-        use_label_encoder=False,
-        eval_metric='logloss',
-        n_estimators=100,
-        max_depth=8,
-        learning_rate=0.1,
-        scale_pos_weight=0.5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
-    )
-    clf.fit(X_train, y_train)
-    y_proba = clf.predict_proba(X_test)[:, 1]
-
-    # === Sweep thresholds to find one that preserves ≥99% signal ===
-    thresholds = np.linspace(0.0, 1.0, 500)
-    tpr_list, fpr_list = [], []
-    best_thresh, best_fpr = None, 1.0
-    target_tpr = 0.99
-
-    for thresh in thresholds:
-        y_pred_temp = (y_proba >= thresh).astype(int)
-        TP = np.sum((y_pred_temp == 1) & (y_test == 1))
-        FP = np.sum((y_pred_temp == 1) & (y_test == 0))
-        FN = np.sum((y_pred_temp == 0) & (y_test == 1))
-        TN = np.sum((y_pred_temp == 0) & (y_test == 0))
-
-        tpr = TP / (TP + FN) if TP + FN > 0 else 0
-        fpr = FP / (FP + TN) if FP + TN > 0 else 0
-
-        tpr_list.append(tpr)
-        fpr_list.append(fpr)
-
-        if tpr >= target_tpr and fpr < best_fpr:
-            best_thresh, best_fpr = thresh, fpr
-
-    if best_thresh is not None:
-        print(f"Threshold for ≥{target_tpr*100:.1f}% signal retention: {best_thresh:.4f}")
-        print(f"Background rejection at that threshold: {1 - best_fpr:.4f}")
-    else:
-        print(f"No threshold found that satisfies TPR ≥ {target_tpr*100:.1f}%")
-        best_thresh = 0.5
-
-    # === Final prediction and metrics ===
-    y_pred = (y_proba >= best_thresh).astype(int)
-    print("\n=== Final Classification Report ===")
-    print(classification_report(y_test, y_pred, target_names=["Background", "Signal"]))
-    print("Confusion Matrix:")
-    print(confusion_matrix(y_test, y_pred))
-    print("ROC AUC score: %.4f" % roc_auc_score(y_test, y_proba))
-
-    # === Plot ROC Curve ===
-    fpr_vals, tpr_vals, _ = roc_curve(y_test, y_proba)
-    auc = roc_auc_score(y_test, y_proba)
-    plt.plot(fpr_vals, tpr_vals, label=f'ROC (AUC = {auc:.3f})')
-    plt.plot([0, 1], [0, 1], 'k--', alpha=0.5)
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve — AB Dataset Classifier")
-    plt.legend(loc='lower right')
-    plt.grid(True)
-    plt.savefig(os.path.join(outdir, "AB_ROC_curve.png"))
-    plt.close()
-
-    # === Plot threshold sweep ===
-    plt.plot(thresholds, tpr_list, label='TPR (Signal Retention)')
-    plt.plot(thresholds, fpr_list, label='FPR (Background Acceptance)')
-    if best_thresh is not None:
-        plt.axvline(best_thresh, color='g', linestyle='--', label=f'TPR ≥ {target_tpr*100:.0f}% @ {best_thresh:.3f}')
-    plt.xlabel("Threshold")
-    plt.ylabel("Metric Value")
-    plt.title("Threshold Sweep — TPR vs FPR")
-    plt.legend(loc='upper right')
-    plt.grid(True)
-    plt.savefig(os.path.join(outdir, "AB_threshold_sweep.png"))
-    plt.close()"""
-    
 if args.plots:
     from functions import extract, plot_overlay
     import os, pickle, random
@@ -414,11 +205,11 @@ if args.classify:
     random.seed(42)
 
     # === Load data ===
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v2.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v3.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
         muons = pickle.load(f)
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v2.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v3.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
         signal = pickle.load(f)
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v2.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v3.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
         background = pickle.load(f)
 
     # === Reassign noise-like clusters to background ===
@@ -472,7 +263,7 @@ if args.classify:
         fpr_list.append(fpr)
         f1_list.append(f1)
 
-    target_tpr = 0.99
+    target_tpr = 0.999
     best_thresh, best_fpr = None, 1.0
     for thresh, tpr, fpr in zip(thresholds, tpr_list, fpr_list):
         if tpr >= target_tpr and fpr < best_fpr:
@@ -495,13 +286,13 @@ if args.classify:
     plt.plot(thresholds, tpr_list, label='TPR (Signal Retention)')
     plt.plot(thresholds, fpr_list, label='FPR (Background Acceptance)')
     if best_thresh is not None:
-        plt.axvline(best_thresh, color='g', linestyle='--', label=f'TPR ≥ {target_tpr*100:.0f}% @ {best_thresh:.3f}')
+        plt.axvline(best_thresh, color='g', linestyle='--', label=f'TPR ≥ {target_tpr*100:.1f}% @ {best_thresh:.3f}')
     plt.xlabel("Threshold")
     plt.ylabel("Metric Value")
     plt.title("Threshold Sweep — TPR, FPR (xB Dataset)")
     plt.legend(loc='best')
     plt.grid(True)
-    plt.savefig(os.path.join(outdir, "threshold_sweep_metrics_xB_label_v2.png"))
+    plt.savefig(os.path.join(outdir, "threshold_sweep_metrics_xB_label_v3_0.999.png"))
     plt.close()
 
     fpr, tpr, _ = roc_curve(y_test, y_proba)
@@ -513,7 +304,7 @@ if args.classify:
     plt.title("ROC Curve — Final XGBoost Classifier (xB Dataset)")
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(outdir, "presentation_ROC_curve_xB_label_v2.png"))
+    # plt.savefig(os.path.join(outdir, "presentation_ROC_curve_xB_label_v3.png"))
     plt.close()
 
     ConfusionMatrixDisplay.from_predictions(
@@ -523,23 +314,23 @@ if args.classify:
         values_format='d'
     )
     plt.title(f"Confusion Matrix @ Threshold = {best_thresh:.4f} xB Dataset")
-    plt.savefig(os.path.join(outdir, "presentation_confusion_matrix_xB_label_v2.png"))
+    # plt.savefig(os.path.join(outdir, "presentation_confusion_matrix_xB_label_v3.png"))
     plt.close()
     
-    functions.plot_feature_importance(
-    clf.feature_importances_,
-    feature_names=[
-        r"$\log(\Delta z)$",
-        r"$\varphi$ extent",
-        r"multiplicity",
-        r"$\log(E_{\mathrm{dep}})$",
-        r"$\cos\theta$",
-        r"cross B boolean label"
-    ],
-    outdir="Classification_AB",
-    filename="feature_importance_xB_label_data_v2",
-    sort=True
-)
+#     functions.plot_feature_importance(
+#     clf.feature_importances_,
+#     feature_names=[
+#         r"$\log(\Delta z)$",
+#         r"$\varphi$ extent",
+#         r"multiplicity",
+#         r"$\log(E_{\mathrm{dep}})$",
+#         r"$\cos\theta$",
+#         r"cross B boolean label"
+#     ],
+#     outdir="Classification_AB",
+#     filename="feature_importance_xB_label_data_v3",
+#     sort=True
+# )
     
 if args.grids:
     '''
@@ -569,11 +360,11 @@ if args.grids:
     random.seed(42)
 
     # === Load data ===
-    with open('ABmuons_edep_xB_label_v2.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v2.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
         muons = pickle.load(f)
-    with open('ABsignal_edep_xB_label_v2.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v2.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
         signal = pickle.load(f)
-    with open('ABbkg_edep_xB_label_v2.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v2.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
         background = pickle.load(f)
 
     # === Reassign noise-like clusters to background ===
@@ -596,10 +387,10 @@ if args.grids:
 
     # === Define hyperparameter grid ===
     param_grid = {
-        'n_estimators': [50, 100, 150, 200, 250, 300],
-        'learning_rate': [0.01, 0.1],
-        'max_depth': [6, 8, 10, 12],
-        'scale_pos_weight': [0.4, 0.5, 0.6]
+        'n_estimators': [50, 100, 150, 200],
+        'learning_rate': [0.01],
+        'max_depth': [6, 8, 10, 12, 15],
+        'scale_pos_weight': [0.5]
     }
 
     # === Grid search ===
@@ -687,11 +478,11 @@ if args.neural:
     random.seed(42)
 
     # === Load data ===
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v2.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABmuons_edep_xB_label_v3.pkl', 'rb') as f: # ABmuons_edep_xB_label.pkl
         muons = pickle.load(f)
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v2.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABsignal_edep_xB_label_v3.pkl', 'rb') as f: # ABsignal_edep_xB_label.pkl
         signal = pickle.load(f)
-    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v2.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
+    with open('/ceph/submit/data/user/h/haoyun22/process_data_FCC_background/ABbkg_edep_xB_label_v3.pkl', 'rb') as f: # ABbkg_edep_xB_label.pkl
         background = pickle.load(f)
 
     # === Reassign noise-like clusters to background ===
@@ -719,8 +510,8 @@ if args.neural:
     train_ds = TensorDataset(X_train, y_train)
     test_ds = TensorDataset(X_test, y_test)
 
-    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, num_workers=4)
+    test_loader = DataLoader(test_ds, batch_size=128, shuffle=False, num_workers=4)
 
     # === Model, loss, optimizer ===
     input_dim = X.shape[1]
@@ -728,21 +519,32 @@ if args.neural:
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
+    experiment_name = 'Model_4'
+
+    save_path = f'Classification_AB/NeuralNetwork/best_{experiment_name}.pth'
+
     # === Train model ===
-    # train_loss, test_loss = train_neural_network(
-    #     model,
-    #     train_loader,
-    #     test_loader
-    # )
+    train_loss, test_loss = train_neural_network(
+        model,
+        train_loader,
+        test_loader,
+        save_path=save_path,
+    )
+
+    checkpoint_path = save_path
+    save_dir = f"Classification_AB/NeuralNetwork/Evaluation_NN/ROC_Curves/{experiment_name}"
+    threshold_plot_dir = f"Classification_AB/NeuralNetwork/Evaluation_NN/Threshold_Plots/{experiment_name}"
+    cm_path = f"Classification_AB/NeuralNetwork/Evaluation_NN/Confusion_Matrix/{experiment_name}"
+
     # === Evaluate model ===
     results = evaluate_model(
-        checkpoint_path="/work/submit/haoyun22/FCC-Beam-Background/Classification_AB/NeuralNetwork/best_model.pth",
+        checkpoint_path=checkpoint_path,
         model_class=ParticleClassifier,
         input_dim=input_dim,
         test_loader=test_loader,
-        save_dir="Classification_AB/NeuralNetwork/Evaluation_NN/ROC_Curves",
-        threshold_plot_dir="Classification_AB/NeuralNetwork/Evaluation_NN/Threshold_Plots",
-        cm_path="Classification_AB/NeuralNetwork/Evaluation_NN/Confusion_Matrix.png"
+        save_dir=save_dir,
+        threshold_plot_dir=threshold_plot_dir,
+        cm_path=cm_path
     )
 
     # === Model Summary Report ===
