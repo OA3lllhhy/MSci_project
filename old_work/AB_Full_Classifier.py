@@ -476,7 +476,7 @@ if args.neural:
     os.environ["TORCH_DISABLE_CPP_PROTOS"] = "1"
     os.environ["TORCH_USE_RTLD_GLOBAL"] = "0"
 
-    outdir = 'Classification_AB/GridSearch'
+    outdir = '/work/submit/haoyun22/FCC-Beam-Background/old_work/Classification_AB/GridSearch'
     os.makedirs(outdir, exist_ok=True)
     random.seed(42)
 
@@ -524,7 +524,7 @@ if args.neural:
 
     experiment_name = 'Model_5_dataV3.1'
 
-    save_path = f'Classification_AB/NeuralNetwork/best_{experiment_name}.pth'
+    save_path = f'/work/submit/haoyun22/FCC-Beam-Background/old_work/Classification_AB/NeuralNetwork/best_{experiment_name}.pth'
 
     # === Train model ===
     train_loss, test_loss = train_neural_network(
@@ -535,9 +535,9 @@ if args.neural:
     )
 
     checkpoint_path = save_path
-    save_dir = f"Classification_AB/NeuralNetwork/Evaluation_NN/ROC_Curves/{experiment_name}"
-    threshold_plot_dir = f"Classification_AB/NeuralNetwork/Evaluation_NN/Threshold_Plots/{experiment_name}"
-    cm_path = f"Classification_AB/NeuralNetwork/Evaluation_NN/Confusion_Matrix/{experiment_name}"
+    save_dir = f"/work/submit/haoyun22/FCC-Beam-Background/old_work/Classification_AB/NeuralNetwork/Evaluation_NN/ROC_Curves/{experiment_name}"
+    threshold_plot_dir = f"/work/submit/haoyun22/FCC-Beam-Background/old_work/Classification_AB/NeuralNetwork/Evaluation_NN/Threshold_Plots/{experiment_name}"
+    cm_path = f"/work/submit/haoyun22/FCC-Beam-Background/old_work/Classification_AB/NeuralNetwork/Evaluation_NN/Confusion_Matrix/{experiment_name}"
 
     # === Evaluate model ===
     results = evaluate_model(
@@ -620,7 +620,7 @@ if args.test:
     input_dim = X.shape[1]
     n_repeat = 500
     exp_name = "1"
-    csv_path = f"/work/submit/haoyun22/FCC-Beam-Background/NN_test/NN_repeat_{exp_name}.csv"
+    csv_path = f"/work/submit/haoyun22/FCC-Beam-Background/old_work/NN_test/NN_repeat_{exp_name}.csv"
     checkpoint_path = f"/ceph/submit/data/user/h/haoyun22/NN_test_checkpath/Train_{exp_name}"
     os.makedirs(checkpoint_path, exist_ok=True)
     result = []
