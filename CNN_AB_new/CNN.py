@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import sys
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, random_split
-from sklearn.metrics import roc_curve, roc_auc_score, accuracy_score
+from sklearn.metrics import precision_recall_curve, roc_curve, roc_auc_score, accuracy_score, average_precision_score
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 from tqdm import trange
@@ -23,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--classify", action="store_true")
 parser.add_argument("--evaluate", action="store_true")
 parser.add_argument("--data", default="/ceph/submit/data/user/h/haoyun22/Patches_CNN_Data/AB_patches_final_2.npz")
-# parser.add_argument("--exp_name", default="1", help="Experiment name identifier")
+parser.add_argument("--exp_name", default="1", help="Experiment name identifier")
 parser.add_argument("--repeat", help="Train model multiple times with different seeds for averaging", action="store_true")
 args = parser.parse_args()
 
@@ -60,7 +61,7 @@ class EarlyStopping:
 
 
 # # exp_name = args.exp_name
-outdir = "/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new"
+# outdir = "/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new"
 outdir_split_data = "/ceph/submit/data/user/h/haoyun22/Patches_CNN_Data/CNN_split_data"
 
 # ======================================================================
@@ -68,7 +69,22 @@ outdir_split_data = "/ceph/submit/data/user/h/haoyun22/Patches_CNN_Data/CNN_spli
 # ======================================================================
 if args.classify:
 
-    outdir = "/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new"
+    # Disable problematic modules
+    sys.modules['onnx'] = None
+    sys.modules['onnxruntime'] = None
+    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+    os.environ["TORCH_DISABLE_CPP_PROTOS"] = "1"
+    os.environ["TORCH_USE_RTLD_GLOBAL"] = "0"
+
+
+    exp_name = args.exp_name
+
+    seed = 42
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    outdir = f"/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new/{exp_name}"
     os.makedirs(outdir, exist_ok=True)
     outdir_split_data = "/ceph/submit/data/user/h/haoyun22/Patches_CNN_Data/CNN_split_data"
     os.makedirs(outdir_split_data, exist_ok=True)
@@ -100,11 +116,16 @@ if args.classify:
     dataset = TensorDataset(X_torch, y_torch)
 
     dataset_train, dataset_validate, dataset_test = random_split(
-        dataset, [0.6, 0.2, 0.2], generator=torch.Generator().manual_seed(2)
+        dataset, [0.6, 0.2, 0.2], generator=torch.Generator().manual_seed(seed)
     )
 
     dloader_train = DataLoader(dataset_train, batch_size=128, shuffle=True)
     dloader_validate = DataLoader(dataset_validate, batch_size=128, shuffle=False)
+
+    patch_size = X.shape[2]
+    print(f"Detected patch size: {patch_size} x {patch_size}")
+    feature_map_size = patch_size // 4  # After 2x MaxPool2d with kernel_size=2
+    flatten_size = 32 * feature_map_size * feature_map_size
 
     # ======================================================================
     # CNN MODEL (same style as notes: Sequential + simple)
@@ -121,7 +142,7 @@ if args.classify:
     nn.Dropout(0.1),
 
     nn.Flatten(),
-    nn.Linear(32 * 8 * 8, 1),
+    nn.Linear(flatten_size, 1),
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -195,7 +216,15 @@ if args.classify:
 # ======================================================================
 if args.evaluate:
 
-    outdir = "/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new"
+    # Disable problematic modules
+    sys.modules['onnx'] = None
+    sys.modules['onnxruntime'] = None
+    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+    os.environ["TORCH_DISABLE_CPP_PROTOS"] = "1"
+    os.environ["TORCH_USE_RTLD_GLOBAL"] = "0"
+
+    exp_name = args.exp_name
+    outdir = f"/work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new/{exp_name}"
     os.makedirs(outdir, exist_ok=True)
 
     # Load model + losses + splits
@@ -235,7 +264,9 @@ if args.evaluate:
     # ROC curve
     fpr, tpr, _ = roc_curve(labels.numpy(), preds.numpy())
     auc = roc_auc_score(labels.numpy(), preds.numpy())
+    pr_auc = average_precision_score(labels.numpy(), preds.numpy())
     print(f"ROC AUC of experiment {exp_name} = {auc}")
+    print(f"PR AUC of experiment {exp_name} = {pr_auc}")
 
     fig, ax = plt.subplots(figsize=(6,5), dpi=150)
     ax.plot(fpr, tpr, color="#D55E00", label=f"AUC={auc:.4f}")
@@ -246,6 +277,18 @@ if args.evaluate:
     ax.grid(alpha=0.3)
     plt.legend()
     plt.savefig(f"{outdir}/CNN_ROC_{exp_name}.png")
+    plt.close()
+
+    # Plot PR curve
+    precision, recall, _ = precision_recall_curve(labels.numpy(), preds.numpy())
+    fig, ax = plt.subplots(figsize=(6,5), dpi=150)
+    ax.plot(recall, precision, color="#0072B2", label=f"PR AUC={pr_auc:.4f}")
+    ax.set_xlabel("Recall", fontsize=15)
+    ax.set_ylabel("Precision", fontsize=15)
+    ax.set_title("CNN Precision-Recall Curve", fontsize=18)
+    ax.grid(alpha=0.3)
+    plt.legend()
+    plt.savefig(f"{outdir}/CNN_PR_{exp_name}.png")
     plt.close()
 
 if args.repeat:

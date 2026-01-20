@@ -1,12 +1,12 @@
 #!/bin/bash
 #
 # ====== Slurm 配置 ======
-#SBATCH --job-name=DM_Model1        # 任务名字
+#SBATCH --job-name=CNN_2c_p        # 任务名字
 #SBATCH --partition=submit-gpu       # GPU 分区
 #SBATCH --gres=gpu:1                 # 申请 1 块 GPU
 #SBATCH --cpus-per-gpu=4             # 每块 GPU 对应 CPU 核心
 #SBATCH --mem=24G                    # 内存
-#SBATCH --time=6:00:00              # 最长运行时间
+#SBATCH --time=4:00:00              # 最长运行时间
 #SBATCH --constraint=nvidia_a30      # 指定 A30 GPU
 #SBATCH --output=logs/%x-%j.out      # 标准输出日志
 #SBATCH --error=logs/%x-%j.err       # 错误日志
@@ -37,13 +37,13 @@ echo "Current directory: $(pwd)"
 # 这里换成你真正的训练脚本和参数
 echo "Start training..."
 # python AB_Full_Classifier.py --test
-# python CNN.py --repeat
-# echo "Training script finished."
+python /work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new/CNN.py --classify --exp_name CNN_2c_p64 --data /ceph/submit/data/user/h/haoyun22/CNN_data/AB_patches_2c_64.npz
+echo "Training script finished."
 
-# echo "Start evaluation..."
-# python CNN.py --evaluate --exp_name Simple2C2D_new_01channel
-# echo "Evaluation script finished."
+echo "Start evaluation..."
+python /work/submit/haoyun22/FCC-Beam-Background/CNN_AB_new/CNN.py --evaluate --exp_name CNN_2c_p64 --data /ceph/submit/data/user/h/haoyun22/CNN_data/AB_patches_2c_64.npz
+echo "Evaluation script finished."
 
 # python train_epm_ddpm.py
-python /work/submit/haoyun22/FCC-Beam-Background/diffusion_model/compare.py
+# python /work/submit/haoyun22/FCC-Beam-Background/diffusion_model/compare.py
 # echo "Job finished."

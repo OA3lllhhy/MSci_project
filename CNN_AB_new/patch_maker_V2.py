@@ -11,7 +11,8 @@ from podio import root_io
 import ROOT
 ROOT.gROOT.SetBatch(True)
 
-import functions
+import old_work.functions as functions
+import sys
 
 # ================================
 # Geometry
@@ -207,8 +208,14 @@ def process_file(filename, sample_label, sample_name, patch_size, max_events):
 # Main
 # ================================
 def main():
+
+    sys.modules['onnx'] = None
+    sys.modules['onnxruntime'] = None
+    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+    os.environ["TORCH_DISABLE_CPP_PROTOS"] = "1"
+    os.environ["TORCH_USE_RTLD_GLOBAL"] = "0"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=str, default="/ceph/submit/data/user/h/haoyun22/AB_patches_final_V2.2.npz")
+    parser.add_argument("--out", type=str, default="/ceph/submit/data/user/h/haoyun22/CNN_data/AB_patches_2c_64.npz")
     parser.add_argument("--patch-size", type=int, default=DEFAULT_PATCH_SIZE)
     parser.add_argument("--max-files", type=int, default=None)
     args = parser.parse_args()

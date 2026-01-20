@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import functions
+import old_work.functions as functions
 
 import glob, pickle
 from collections import defaultdict
@@ -26,6 +26,7 @@ ROOT.gROOT.SetBatch(True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--run', action='store_true', help='Run the data extraction from ROOT files')
+parser.add_argument('--stat', action='store_true', help='Run statistics on ROOT files')
 args = parser.parse_args()
 
 # -----------------------------
@@ -403,3 +404,42 @@ if args.run:
         with open(cfg["outfile"], "wb") as f:
             pickle.dump(events_out, f)
         print(f"✅ Saved {label} e± events: N_events={len(events_out)} to {cfg['outfile']}")
+
+
+if args.stat:
+    # Read ROOT files, print all collections and PDG counts
+    file = "/ceph/submit/data/group/fcc/ee/detector/VTXStudiesFullSim/CLD_o2_v05/FCCee_Z_4IP_04may23_FCCee_Z/101230.root"
+
+    reader = root_io.Reader(file)
+    events = reader.get('events')
+    
+    # 统计PDG (从VertexBarrelCollection的MCParticle获取)
+    print("Method 1: PDG counts from VertexBarrelCollection hits:")
+    print("="*60)
+    pdg_counter_hits = defaultdict(int)
+    for event in events:
+        for hit in event.get('VertexBarrelCollection'):
+            mc = hit.getMCParticle()
+            if mc is not None:
+                pdg = int(mc.getPDG())
+                pdg_counter_hits[pdg] += 1
+    
+    for pdg, count in sorted(pdg_counter_hits.items(), key=lambda x: -x[1]):
+        print(f"PDG {pdg:6d}: {count:8d}")
+    
+    # 重新读取文件来统计所有MCParticles
+    print("\n" + "="*60)
+    print("Method 2: PDG counts from all MCParticles:")
+    print("="*60)
+    
+    reader = root_io.Reader(file)
+    events = reader.get('events')
+    pdg_counter_all = defaultdict(int)
+    
+    for event in events:
+        for mc in event.get('MCParticles'):  # 正确的collection名称
+            pdg = int(mc.getPDG())
+            pdg_counter_all[pdg] += 1
+    
+    for pdg, count in sorted(pdg_counter_all.items(), key=lambda x: -x[1]):
+        print(f"PDG {pdg:6d}: {count:8d}")
