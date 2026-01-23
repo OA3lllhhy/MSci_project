@@ -172,7 +172,7 @@ class MomentumDenoiser(nn.Module):
         x = self.p_in(p_t) + self.pdg_emb(pdg_id)
 
         t_emb = sinusoidal_time_embedding(t, dim=self.d_model).to(p_t.device)  # (B,d_model)
-        x = x + self.t_mlp(t_emb).unsqueeze(1)
+        x = x + self.t_mlp(t_emb).unsqueeze(1) #!
 
         key_padding_mask = ~mask
         h = self.encoder(x, src_key_padding_mask=key_padding_mask)
@@ -235,7 +235,7 @@ def sample_event(model, dataset: EPairsDataset, sched: DiffusionSchedule, device
     mask = mask.unsqueeze(0)      # (1,K)
 
     K = pdg_id.shape[1]
-    p = torch.randn(1, K, 3, device=device)
+    p = torch.randn(1, K, 3, device=device) # put 10000 sth to accelerate, get rid of loop 不使用loop一个个events生成，而是一次生成一个batch的events
 
     for ti in reversed(range(steps)):
         """

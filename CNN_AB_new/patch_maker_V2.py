@@ -17,11 +17,11 @@ import sys
 # ================================
 # Geometry
 # ================================
-PITCH_MM   = functions.PITCH_MM
-RADIUS_MM  = functions.RADIUS_MM
-MAX_Z      = functions.max_z
-N_PHI_BINS = functions.n_phi_bins
-N_Z_BINS   = functions.n_z_bins
+PITCH_MM   = 0.005 # 25 μm
+RADIUS_MM  = 14
+MAX_Z      = 110
+N_PHI_BINS = int((2 * math.pi * RADIUS_MM) / PITCH_MM)
+N_Z_BINS   = int((2 * MAX_Z) / PITCH_MM)
 
 LAYER_RADII   = [14, 36, 58]
 TARGET_LAYER  = 0
@@ -32,7 +32,7 @@ DEFAULT_PATCH_SIZE = 32
 # Noise definition for reassignment
 # noise_pids = {11, -11, 13, -13, -211, 22, 211, 2212, -2212}
 noise_pids = {11, -11, 13}
-ENERGY_CUT = 0.0000   # adjustable threshold
+ENERGY_CUT = 0.02   # adjustable threshold
 
 # ================================
 # Input samples
@@ -98,7 +98,8 @@ def make_patch(event_hits, bx, by, bz, patch_size, source_label):
         z_idx, phi_idx = functions.get_grid_indices(h.x, h.y, h.z)
 
         dz = z_idx - z_c
-        dphi = phi_idx - phi_c
+        # dphi = phi_idx - phi_c
+        dphi = ((phi_idx - phi_c + N_PHI_BINS//2) % N_PHI_BINS) - N_PHI_BINS//2
 
         if abs(dz) >= patch_half or abs(dphi) >= patch_half:
             continue
@@ -215,7 +216,7 @@ def main():
     os.environ["TORCH_DISABLE_CPP_PROTOS"] = "1"
     os.environ["TORCH_USE_RTLD_GLOBAL"] = "0"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=str, default="/ceph/submit/data/user/h/haoyun22/CNN_data/AB_patches_2c_64.npz")
+    parser.add_argument("--out", type=str, default="/ceph/submit/data/user/h/haoyun22/CNN_data/AB_patches_2c_5um_dphi_ec002.npz")
     parser.add_argument("--patch-size", type=int, default=DEFAULT_PATCH_SIZE)
     parser.add_argument("--max-files", type=int, default=None)
     args = parser.parse_args()

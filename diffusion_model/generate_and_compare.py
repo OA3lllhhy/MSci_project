@@ -69,7 +69,7 @@ def main():
     gen_N = []
     gen_pnorm_list = []
 
-    for i in range(args.n_gen):
+    for i in range(args.n_gen): # 尝试并行生成
         pdg_id, p_out = sample_event(model, dataset, sched, device=device, steps=steps)
         gen_N.append(len(p_out))
         gen_pnorm_list.append(np.linalg.norm(p_out, axis=1))

@@ -34,6 +34,9 @@ from diffusion_functions import (
     EPairsDataset,
     MomentumDenoiser,
     sample_event,
+    get_momentum_xyz,
+    extract_epm_events,
+    train_steps,
 )
 
 # Import ROOT and podio for data extraction
@@ -53,95 +56,6 @@ FUNCTIONS_AVAILABLE = True
 # ============================================================================
 # PART 1: DATA EXTRACTION
 # ============================================================================
-
-def get_momentum_xyz(mc):
-    """Robustly get (px, py, pz) from EDM4hep MCParticle."""
-    mom = mc.getMomentum()
-    if hasattr(mom, "x"):
-        return float(mom.x), float(mom.y), float(mom.z)
-    if hasattr(mom, "X"):
-        return float(mom.X()), float(mom.Y()), float(mom.Z())
-    if hasattr(mc, "getPx"):
-        return float(mc.getPx()), float(mc.getPy()), float(mc.getPz())
-    raise RuntimeError("Cannot extract momentum. Check MCParticle API.")
-
-
-def extract_epm_events(files, limit_files=None, target_layer=0):
-    """
-    Extract e+/e- events from ROOT files.
-    
-    Args:
-        files: List of ROOT file paths
-        limit_files: Maximum number of files to process
-        target_layer: Target detector layer index
-    
-    Returns:
-        List of event dicts with keys "p" (N,3) and "pdg" (N,)
-    """
-    if not PODIO_AVAILABLE:
-        raise RuntimeError("podio/ROOT not available. Cannot extract data.")
-    
-    
-    LAYER_RADII = [14, 36, 58]
-    ELECTRON_PDGS = {11, -11}
-    events_out = []
-
-    for i, filename in enumerate(files):
-        if limit_files is not None and i >= limit_files:
-            break
-        print(f"Processing file {i+1}/{limit_files or len(files)}: {filename}")
-
-        reader = root_io.Reader(filename)
-        events = reader.get('events')
-
-        for event in events:
-            track_dict = {}
-
-            for hit in event.get('VertexBarrelCollection'):
-                # Layer selection
-                if FUNCTIONS_AVAILABLE:
-                    if functions.radius_idx(hit, LAYER_RADII) != target_layer:
-                        continue
-                else:
-                    # Simple radius check if functions not available
-                    pass
-                
-                # Primary only
-                if hit.isProducedBySecondary():
-                    continue
-
-                mc = hit.getMCParticle()
-                if mc is None:
-                    continue
-
-                pid = int(mc.getPDG())
-                if pid not in ELECTRON_PDGS:
-                    continue
-
-                trackID = mc.getObjectID().index
-                if trackID in track_dict:
-                    continue
-
-                try:
-                    px, py, pz = get_momentum_xyz(mc)
-                except Exception as e:
-                    print(f"Skipping track {trackID}: {e}")
-                    continue
-
-                track_dict[trackID] = (pid, (px, py, pz))
-
-            if len(track_dict) == 0:
-                continue
-
-            pdg = np.array([v[0] for v in track_dict.values()], dtype=np.int32)
-            p = np.array([v[1] for v in track_dict.values()], dtype=np.float32)
-            p = p / 1e-3  # Convert to MeV
-
-            events_out.append({"p": p, "pdg": pdg})
-
-    return events_out
-
-
 def run_extraction(args):
     """Run data extraction phase."""
     print("\n" + "="*60)
@@ -185,50 +99,6 @@ def run_extraction(args):
 # ============================================================================
 # PART 2: TRAINING
 # ============================================================================
-
-def train_steps(model, loader, optim, sched, device, num_steps, log_every=50):
-    """Training loop for specified number of steps."""
-    model.train()
-    it = iter(loader)
-    losses = []
-
-    for step in range(1, num_steps + 1):
-        try:
-            batch = next(it)
-        except StopIteration:
-            it = iter(loader)
-            batch = next(it)
-
-        p0 = batch["p0"].to(device)
-        pdg_id = batch["pdg_id"].to(device)
-        mask = batch["mask"].to(device)
-
-        B = p0.shape[0]
-        t = torch.randint(0, sched.T, (B,), device=device)
-
-        abar_t = sched.sqrt_abar[t].view(B, 1, 1)
-        omabar_t = sched.sqrt_one_minus_abar[t].view(B, 1, 1)
-
-        eps = torch.randn_like(p0)
-        p_t = abar_t * p0 + omabar_t * eps
-
-        eps_pred = model(p_t, pdg_id, mask, t)
-
-        m = mask.unsqueeze(-1).float()
-        loss = ((eps_pred - eps) ** 2 * m).sum() / (m.sum() * 3.0 + 1e-8)
-
-        optim.zero_grad(set_to_none=True)
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optim.step()
-
-        losses.append(loss.item())
-        if step % log_every == 0 or step == 1:
-            print(f"step {step:05d}/{num_steps} | loss={np.mean(losses[-log_every:]):.6f}")
-
-    return float(np.mean(losses))
-
-
 def run_training(args):
     """Run training phase."""
     print("\n" + "="*60)

@@ -90,7 +90,17 @@ if args.classify:
     os.makedirs(outdir_split_data, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using:", device)
+    print("=" * 50)
+    print("GPU/CUDA Information:")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"Number of GPUs: {torch.cuda.device_count()}")
+        print(f"Current GPU: {torch.cuda.current_device()}")
+        print(f"GPU name: {torch.cuda.get_device_name(0)}")
+    print(f"Using device: {device}")
+    print("=" * 50)
 
     print("Loading dataset...")
     npz = np.load(args.data)
@@ -297,7 +307,15 @@ if args.repeat:
     import random
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("Using:", device)
+    print("=" * 50)
+    print("GPU/CUDA Information:")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"GPU name: {torch.cuda.get_device_name(0)}")
+    print(f"Using device: {device}")
+    print("=" * 50)
 
     n_repeats = 200
     results = []
