@@ -26,6 +26,81 @@ except ImportError:
 
 FUNCTIONS_AVAILABLE = True
 
+from dataclasses import dataclass
+
+
+@dataclass
+class ExtractConfig:
+    """Data extraction configuration"""
+    files: str = None
+    outfile: str = "/ceph/submit/data/user/h/haoyun22/diffusion_data/epm_bkg_events.pkl"
+    limit_files: int = int(1e6)
+    target_layer: int = 0
+
+
+@dataclass
+class TrainConfig:
+    """Training configuration"""
+    # Data
+    pkl: str = "/ceph/submit/data/user/h/haoyun22/diffusion_data/epm_bkg_events.pkl"
+    outdir: str = "/work/submit/haoyun22/FCC-Beam-Background/diffusion_model/model_out_test_kmax128"
+    
+    # Model architecture
+    d_model: int = 128
+    nhead: int = 8
+    num_layers: int = 4
+    kmax: int = 96
+    
+    # Training
+    T: int = 1000
+    batch_size: int = 8
+    num_steps: int = 1200
+    lr: float = 2e-4
+    log_every: int = 50
+    
+    # System
+    device: str = "cuda"
+    toy: bool = False
+
+    # Sampling
+    sample_steps: int = 1000
+    
+    @classmethod
+    def toy_config(cls):
+        """返回 toy 模式配置"""
+        return cls(
+            T=200,
+            d_model=64,
+            nhead=4,
+            num_layers=2,
+            batch_size=4,
+            num_steps=300,
+            lr=3e-4,
+            log_every=20,
+            sample_steps=50,
+            toy=True
+        )
+
+
+@dataclass
+class GenerateConfig:
+    """Generation configuration"""
+    ckpt: str = "/work/submit/haoyun22/FCC-Beam-Background/diffusion_model/model_out_kmax128/ckpt.pt"
+    pkl: str = "/ceph/submit/data/user/h/haoyun22/diffusion_data/epm_bkg_events.pkl"
+    outdir: str = "/work/submit/haoyun22/FCC-Beam-Background/diffusion_model/checks_model_kmax128"
+    
+    device: str = "cuda"
+    n_gen: int = 500
+    use_steps: int = -1
+    
+    # Plotting
+    bins: int = 50
+    momentum_bins: int = 50
+    logp_bins: int = 50
+    p_clip: float = -1.0
+    to_gev: bool = False
+    scale_back: float = 1e-3
+
 
 # -----------------------------
 # Helper function from functions
@@ -242,6 +317,42 @@ class MomentumDenoiser(nn.Module):
 
 
 # -----------------------------
+# Validation function
+# -----------------------------
+@torch.no_grad()
+def validate(model, loader, sched, device):
+    """计算验证集损失"""
+    model.eval()
+    total_loss = 0
+    total_samples = 0
+    
+    for batch in loader:
+        p0 = batch["p0"].to(device)
+        pdg_id = batch["pdg_id"].to(device)
+        mask = batch["mask"].to(device)
+        
+        B = p0.shape[0]
+        t = torch.randint(0, sched.T, (B,), device=device)
+        
+        abar_t = sched.sqrt_abar[t].view(B, 1, 1)
+        omabar_t = sched.sqrt_one_minus_abar[t].view(B, 1, 1)
+        
+        eps = torch.randn_like(p0)
+        p_t = abar_t * p0 + omabar_t * eps
+        
+        eps_pred = model(p_t, pdg_id, mask, t)
+        
+        m = mask.unsqueeze(-1).float()
+        loss = ((eps_pred - eps) ** 2 * m).sum() / (m.sum() * 3.0 + 1e-8)
+        
+        total_loss += loss.item() * B
+        total_samples += B
+    
+    model.train()
+    return total_loss / total_samples
+
+
+# -----------------------------
 # Sampling function
 # -----------------------------
 @torch.no_grad()
@@ -390,17 +501,83 @@ def extract_epm_events(files, limit_files=None, target_layer=0):
 
 
 
-def train_steps(model, loader, optim, sched, device, num_steps, log_every=50):
-    """Training loop for specified number of steps."""
+# def train_steps(model, loader, optim, sched, device, num_steps, log_every=50):
+#     """Training loop for specified number of steps."""
+#     model.train()
+#     it = iter(loader)
+#     losses = []
+
+#     for step in range(1, num_steps + 1):
+#         try:
+#             batch = next(it)
+#         except StopIteration:
+#             it = iter(loader)
+#             batch = next(it)
+
+#         p0 = batch["p0"].to(device)
+#         pdg_id = batch["pdg_id"].to(device)
+#         mask = batch["mask"].to(device)
+
+#         B = p0.shape[0]
+#         t = torch.randint(0, sched.T, (B,), device=device)
+
+#         abar_t = sched.sqrt_abar[t].view(B, 1, 1)
+#         omabar_t = sched.sqrt_one_minus_abar[t].view(B, 1, 1)
+
+#         eps = torch.randn_like(p0)
+#         p_t = abar_t * p0 + omabar_t * eps
+
+#         eps_pred = model(p_t, pdg_id, mask, t)
+
+#         m = mask.unsqueeze(-1).float()
+#         loss = ((eps_pred - eps) ** 2 * m).sum() / (m.sum() * 3.0 + 1e-8)
+
+#         optim.zero_grad(set_to_none=True)
+#         loss.backward()
+#         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+#         optim.step()
+
+#         losses.append(loss.item())
+#         if step % log_every == 0 or step == 1:
+#             print(f"step {step:05d}/{num_steps} | loss={np.mean(losses[-log_every:]):.6f}")
+
+#     return float(np.mean(losses))
+
+def train_steps(model, train_loader, optim, sched, device, num_steps, 
+                val_loader=None, log_every=50, val_interval=None):
+    """
+    Training loop for specified number of steps with optional validation.
+    
+    Args:
+        model: Model to train
+        train_loader: Training data loader
+        optim: Optimizer
+        sched: Diffusion schedule
+        device: Device to train on
+        num_steps: Number of training steps
+        val_loader: Optional validation data loader
+        log_every: Log training loss every N steps
+        val_interval: Validate every N steps (default: log_every * 2)
+    
+    Returns:
+        dict: Training history with keys 'train_losses', 'val_losses', 'val_steps'
+    """
     model.train()
-    it = iter(loader)
-    losses = []
+    it = iter(train_loader)
+    train_losses = []
+    val_losses = []
+    val_steps = []
+    
+    if val_interval is None:
+        val_interval = log_every * 2
+    
+    do_validation = val_loader is not None
 
     for step in range(1, num_steps + 1):
         try:
             batch = next(it)
         except StopIteration:
-            it = iter(loader)
+            it = iter(train_loader)
             batch = next(it)
 
         p0 = batch["p0"].to(device)
@@ -426,8 +603,31 @@ def train_steps(model, loader, optim, sched, device, num_steps, log_every=50):
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optim.step()
 
-        losses.append(loss.item())
+        train_losses.append(loss.item())
+        
+        # Logging and validation
         if step % log_every == 0 or step == 1:
-            print(f"step {step:05d}/{num_steps} | loss={np.mean(losses[-log_every:]):.6f}")
+            recent_train_loss = np.mean(train_losses[-log_every:])
+            print(f"step {step:05d}/{num_steps} | train_loss={recent_train_loss:.6f}", end="")
+            
+            # Validation
+            if do_validation and (step % val_interval == 0 or step == num_steps):
+                val_loss = validate(model, val_loader, sched, device)
+                val_losses.append(val_loss)
+                val_steps.append(step)
+                
+                print(f" | val_loss={val_loss:.6f}", end="")
+                
+                # Overfitting warning
+                if val_loss > recent_train_loss * 1.5:
+                    print(" ⚠️  val >> train", end="")
+            
+            print()  # New line
 
-    return float(np.mean(losses))
+    return {
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'val_steps': val_steps,
+        'avg_train_loss': float(np.mean(train_losses)),
+        'avg_val_loss': float(np.mean(val_losses)) if val_losses else 0.0
+    }
