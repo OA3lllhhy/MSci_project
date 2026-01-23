@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple
 
 import numpy as np
-import old_work.functions as functions
+# Removed: import old_work.functions as functions  # Causes boost_histogram dependency issues
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,6 +25,22 @@ except ImportError:
     print("Run source /work/submit/jaeyserm/software/FCCAnalyses/setup.sh to enable podio.")
 
 FUNCTIONS_AVAILABLE = True
+
+
+# -----------------------------
+# Helper function from functions
+# -----------------------------
+def radius_idx(hit, layer_radii):
+    """
+    Calculates polar radius of particle.
+    Inputs: hit, SimTrackerHit object.
+    Output: r, int representing polar radius in mm.
+    """
+    true_radius = hit.rho()
+    for i, r in enumerate(layer_radii):
+        if abs(true_radius - r) < 4:
+            return i
+    raise ValueError(f"Not close enough to any of the layers {true_radius}")
 
 
 # -----------------------------
@@ -331,7 +347,7 @@ def extract_epm_events(files, limit_files=None, target_layer=0):
             for hit in event.get('VertexBarrelCollection'):
                 # Layer selection
                 if FUNCTIONS_AVAILABLE:
-                    if functions.radius_idx(hit, LAYER_RADII) != target_layer:
+                    if radius_idx(hit, LAYER_RADII) != target_layer:
                         continue
                 else:
                     # Simple radius check if functions not available

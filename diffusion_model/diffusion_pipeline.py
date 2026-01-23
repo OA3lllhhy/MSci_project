@@ -20,7 +20,7 @@ import glob
 import pickle
 import random
 import argparse
-import old_work.functions as functions
+# import functions
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -132,8 +132,8 @@ def run_training(args):
     # toy vs normal
     if args.toy:
         T = 200
-        d_model = 96
-        nhead = 6
+        d_model = 64
+        nhead = 4
         num_layers = 2
         batch_size = 4
         num_steps = 300
@@ -147,7 +147,7 @@ def run_training(args):
         nhead = 8
         num_layers = 4
         batch_size = 8
-        num_steps = 1500
+        num_steps = 1000
         lr = 2e-4
         sample_steps = 1000
         log_every = 50
@@ -237,18 +237,28 @@ def run_generation(args):
     # Generate events
     print(f"\nGenerating {args.n_gen} events (steps={steps})...")
     gen_N = []
+    gen_p_list = []
     gen_pnorm_list = []
     
+    start_time = time.time()
     for i in range(args.n_gen):
         pdg_id, p_out = sample_event(model, dataset, sched, device, steps)
-        gen_N.append(len(p_out))
-        gen_pnorm_list.append(np.linalg.norm(p_out, axis=1))
+        gen_N.append(len(p_out)) # Number of particles in this event
+        gen_p_list.append(p_out) # p_x, p_y, p_z for this event
+        gen_pnorm_list.append(np.linalg.norm(p_out, axis=1)) # |p| for this event
         
         if (i + 1) % max(1, args.n_gen // 20) == 0:
             print(f"  Progress: {i+1}/{args.n_gen}")
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    mean_time = elapsed / args.n_gen
+    print(f"\nGeneration completed in {elapsed/60:.2f} min ({elapsed/args.n_gen:.2f} s/event)")
+    print(f"Average time per event: {mean_time:.2f} s")
     
     gen_N = np.array(gen_N, dtype=np.int32)
     gen_pnorm = np.concatenate(gen_pnorm_list, axis=0)
+    gen_p = np.concatenate(gen_p_list, axis=0)  # (total_particles, 3)
     
     print(f"\nGenerated multiplicity: min={gen_N.min()} max={gen_N.max()} mean={gen_N.mean():.2f}")
     print(f"\nTop 10 multiplicities (Real): {Counter(real_N.tolist()).most_common(10)}")
@@ -277,59 +287,61 @@ def run_generation(args):
         os.makedirs(args.outdir, exist_ok=True)
     
     # 1. Multiplicity histogram
-    nmin = int(min(real_N.min(), gen_N.min()))
-    nmax = int(max(real_N.max(), gen_N.max()))
-    binsN = np.linspace(nmin, nmax + 1, args.bins + 1)
+    # nmin = int(min(real_N.min(), gen_N.min()))
+    # nmax = int(max(real_N.max(), gen_N.max()))
+    # binsN = np.linspace(nmin, nmax + 1, args.bins + 1)
     
-    plt.figure(figsize=(10, 6))
-    plt.hist(real_N, bins=binsN, alpha=0.6, density=True, label="Real")
-    plt.hist(gen_N, bins=binsN, alpha=0.6, density=True, label="Generated")
-    plt.xlabel("Multiplicity N(e±)")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.title(f"Multiplicity Distribution | real={len(real_N)}, gen={len(gen_N)}")
-    plt.savefig(os.path.join(args.outdir, "multiplicity_hist.png"), dpi=200, bbox_inches="tight")
-    print(f"\n✅ Saved: multiplicity_hist.png")
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(real_N, bins=binsN, alpha=0.6, density=True, label="Real")
+    # plt.hist(gen_N, bins=binsN, alpha=0.6, density=True, label="Generated")
+    # plt.xlabel("Multiplicity N(e±)")
+    # plt.ylabel("Density")
+    # plt.legend()
+    # plt.title(f"Multiplicity Distribution | real={len(real_N)}, gen={len(gen_N)}")
+    # plt.savefig(os.path.join(args.outdir, "multiplicity_hist.png"), dpi=200, bbox_inches="tight")
+    # print(f"\n✅ Saved: multiplicity_hist.png")
     
     # 2. |p| linear histogram
-    pmin = float(min(real_pnorm_plot.min(), gen_pnorm_plot.min()))
-    pmax = float(max(real_pnorm_plot.max(), gen_pnorm_plot.max()))
-    binsP = np.linspace(pmin, pmax, args.momentum_bins + 1)
+    # pmin = float(min(real_pnorm_plot.min(), gen_pnorm_plot.min()))
+    # pmax = float(max(real_pnorm_plot.max(), gen_pnorm_plot.max()))
+    # binsP = np.linspace(pmin, pmax, args.momentum_bins + 1)
     
-    plt.figure(figsize=(10, 6))
-    plt.hist(real_pnorm_plot, bins=binsP, alpha=0.6, density=True, label="Real")
-    plt.hist(gen_pnorm_plot, bins=binsP, alpha=0.6, density=True, label="Generated")
-    plt.xlabel(f"|p| ({p_unit})")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.title(f"|p| Distribution (Linear)")
-    plt.savefig(os.path.join(args.outdir, "p_hist_linear.png"), dpi=200, bbox_inches="tight")
-    print(f"✅ Saved: p_hist_linear.png")
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(real_pnorm_plot, bins=binsP, alpha=0.6, density=True, label="Real")
+    # plt.hist(gen_pnorm_plot, bins=binsP, alpha=0.6, density=True, label="Generated")
+    # plt.xlabel(f"|p| ({p_unit})")
+    # plt.ylabel("Density")
+    # plt.legend()
+    # plt.title(f"|p| Distribution (Linear)")
+    # plt.savefig(os.path.join(args.outdir, "p_hist_linear.png"), dpi=200, bbox_inches="tight")
+    # print(f"✅ Saved: p_hist_linear.png")
     
     # 3. log10(|p|) histogram
-    eps = 1e-12
-    real_logp = np.log10(np.maximum(real_pnorm_plot, eps))
-    gen_logp = np.log10(np.maximum(gen_pnorm_plot, eps))
+    # eps = 1e-12
+    # real_logp = np.log10(np.maximum(real_pnorm_plot, eps))
+    # gen_logp = np.log10(np.maximum(gen_pnorm_plot, eps))
     
-    lpmin = float(min(real_logp.min(), gen_logp.min()))
-    lpmax = float(max(real_logp.max(), gen_logp.max()))
-    binsLP = np.linspace(lpmin, lpmax, args.logp_bins + 1)
+    # lpmin = float(min(real_logp.min(), gen_logp.min()))
+    # lpmax = float(max(real_logp.max(), gen_logp.max()))
+    # binsLP = np.linspace(lpmin, lpmax, args.logp_bins + 1)
     
-    plt.figure(figsize=(10, 6))
-    plt.hist(real_logp, bins=binsLP, alpha=0.6, density=True, label="Real")
-    plt.hist(gen_logp, bins=binsLP, alpha=0.6, density=True, label="Generated")
-    plt.xlabel(f"log10(|p|) ({p_unit})")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.title("log10(|p|) Distribution")
-    plt.savefig(os.path.join(args.outdir, "p_hist_log10.png"), dpi=200, bbox_inches="tight")
-    print(f"✅ Saved: p_hist_log10.png")
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(real_logp, bins=binsLP, alpha=0.6, density=True, label="Real")
+    # plt.hist(gen_logp, bins=binsLP, alpha=0.6, density=True, label="Generated")
+    # plt.xlabel(f"log10(|p|) ({p_unit})")
+    # plt.ylabel("Density")
+    # plt.legend()
+    # plt.title("log10(|p|) Distribution")
+    # plt.savefig(os.path.join(args.outdir, "p_hist_log10.png"), dpi=200, bbox_inches="tight")
+    # print(f"✅ Saved: p_hist_log10.png")
     
     # Save arrays
-    np.save(os.path.join(args.outdir, "real_N.npy"), real_N)
-    np.save(os.path.join(args.outdir, "gen_N.npy"), gen_N)
-    np.save(os.path.join(args.outdir, "real_pnorm.npy"), real_pnorm_plot)
-    np.save(os.path.join(args.outdir, "gen_pnorm.npy"), gen_pnorm_plot)
+    # np.save(os.path.join(args.outdir, "real_N.npy"), real_N)
+    # np.save(os.path.join(args.outdir, "gen_N.npy"), gen_N)
+    # np.save(os.path.join(args.outdir, "real_pnorm.npy"), real_pnorm_plot)
+    # np.save(os.path.join(args.outdir, "gen_pnorm.npy"), gen_pnorm_plot)
+    np.save(os.path.join(args.outdir, f"real_3d_p_{steps}s.npy"), real_p)
+    np.save(os.path.join(args.outdir, f"gen_3d_p_{steps}s.npy"), gen_p)
     print(f"✅ Saved arrays to: {args.outdir}/")
 
 
@@ -344,13 +356,13 @@ def main():
         epilog="""
 Examples:
   # Extract data
-  python diffusion_pipeline.py extract --outfile /path/to/data.pkl --limit_files 100
+  python diffusion_model/diffusion_pipeline.py extract --outfile /path/to/data.pkl --limit_files 100
 
   # Train model
-  python diffusion_pipeline.py train --pkl /path/to/data.pkl --num_steps 3000
+  python diffusion_model/diffusion_pipeline.py train --pkl /path/to/data.pkl --num_steps 3000
 
   # Generate and compare
-  python diffusion_pipeline.py generate --ckpt model_out/ckpt.pt --pkl /path/to/data.pkl --n_gen 1000
+  python diffusion_model/diffusion_pipeline.py generate --ckpt model_out/ckpt.pt --pkl /path/to/data.pkl --n_gen 1000
         """
     )
     
@@ -374,7 +386,7 @@ Examples:
                               default="/ceph/submit/data/user/h/haoyun22/diffusion_data/epm_bkg_events.pkl",
                               help="Input pickle file with training data")
     train_parser.add_argument("--outdir", type=str, 
-                              default="/work/submit/haoyun22/FCC-Beam-Background/diffusion_model/model_out_kmax128",
+                              default="/work/submit/haoyun22/FCC-Beam-Background/diffusion_model/model_out_test_kmax128",
                               help="Output directory for checkpoints")
     train_parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
     train_parser.add_argument("--kmax", type=int, default=96, help="Maximum sequence length")
